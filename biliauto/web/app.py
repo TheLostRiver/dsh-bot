@@ -292,8 +292,8 @@ class BrowseManager:
     async def start(self, cfg: AppConfig) -> None:
         if self.running:
             raise RuntimeError("自动逛 B 站已在运行")
-        if not cfg.browse.zones and not cfg.browse.keywords:
-            raise RuntimeError("既没选分区也没填关键词，不知道逛哪儿")
+        if not cfg.browse.zones and not cfg.browse.keywords and not cfg.browse.ups and not cfg.browse.topics:
+            raise RuntimeError("没选 UP 主 / 话题 / 关键词 / 分区，不知道逛哪儿")
         self.runner = self._build(cfg)
         self.runner.start()
 
@@ -378,9 +378,14 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "batch": cfg.browse.batch,
             "max_llm": cfg.browse.max_llm,
             "zones": list(cfg.browse.zones),
+            "ups": list(cfg.browse.ups),
+            "up_names": list(cfg.browse.up_names),
+            "topics": list(cfg.browse.topics),
             "keywords": list(cfg.browse.keywords),
             "days": cfg.browse.days,
             "order": cfg.browse.order,
+            "min_play": cfg.browse.min_play,
+            "min_duration": cfg.browse.min_duration,
             "max_subtitle_chars": cfg.browse.max_subtitle_chars,
             "favorite_folder": cfg.browse.favorite_folder,
             "like": _action_dict(cfg.browse.like),
@@ -688,14 +693,27 @@ def create_app() -> FastAPI:
     @app.post("/api/browse/round")
     async def browse_round() -> dict:
         cfg = AppConfig.load()
-        if not cfg.browse.zones and not cfg.browse.keywords:
-            raise HTTPException(status_code=409, detail="既没选分区也没填关键词")
+        if not cfg.browse.zones and not cfg.browse.keywords and not cfg.browse.ups and not cfg.browse.topics:
+            raise HTTPException(status_code=409, detail="没选 UP 主 / 话题 / 关键词 / 分区")
         try:
             result = await browse_mgr.round_now(cfg)
         except Exception as e:
             log.exception("逛一轮失败")
             raise HTTPException(status_code=500, detail=f"失败：{e}")
         return {"ok": True, "result": result, "browse": browse_mgr.snapshot()}
+
+    @app.get("/api/browse/resolve")
+    async def browse_resolve(name: str) -> dict:
+        """按昵称搜 UP 主，方便后台加人时不用手抄 mid。"""
+        name = (name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="请输入 UP 主昵称")
+        from ..bili import build_credential
+        from ..browse.source import Source
+
+        cfg = AppConfig.load()
+        items = await Source(build_credential(cfg.bili)).resolve_up(name)
+        return {"items": items}
 
     @app.get("/api/browse/actions")
     async def browse_actions(limit: int = 30) -> dict:

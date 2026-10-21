@@ -213,10 +213,18 @@ async function loadSettings() {
       $("b-keywords").value = (s.browse.keywords || []).join(",");
       selectedZones = new Set(s.browse.zones || []);
       buildZoneChips();
+      const ups = s.browse.ups || [];
+      const names = s.browse.up_names || [];
+      selectedUps = new Map(ups.map((m, i) => [String(m), names[i] || ""]));
+      renderUps();
+      selectedTopics = new Set(s.browse.topics || []);
+      renderTopics();
       $("b-batch").value = s.browse.batch;
       $("b-llm").value = s.browse.max_llm;
       $("b-order").value = s.browse.order || "pubdate";
       $("b-days").value = s.browse.days;
+      $("b-mindur").value = s.browse.min_duration ?? 60;
+      $("b-minplay").value = s.browse.min_play ?? 300;
       $("b-interval").value = s.browse.interval;
       $("b-folder").value = s.browse.favorite_folder || "";
       for (const [key, prefix] of ACTIONS) {
@@ -286,8 +294,13 @@ function collectSettings() {
       batch: Math.trunc(num("b-batch", 6)),
       max_llm: Math.trunc(num("b-llm", 3)),
       zones: Array.from(selectedZones),
+      ups: Array.from(selectedUps.keys()).map(Number),
+      up_names: Array.from(selectedUps.values()),
+      topics: Array.from(selectedTopics),
       keywords: $("b-keywords").value.split(",").map((x) => x.trim()).filter(Boolean),
       days: Math.trunc(num("b-days", 7)),
+      min_duration: Math.trunc(num("b-mindur", 60)),
+      min_play: Math.trunc(num("b-minplay", 300)),
       order: $("b-order").value,
       max_subtitle_chars: 6000,
       favorite_folder: $("b-folder").value.trim() || "AI 精选",
@@ -671,7 +684,120 @@ const ACTIONS = [
 ];
 
 let selectedZones = new Set();
+let selectedUps = new Map(); // mid(字符串) -> uname
+let selectedTopics = new Set();
 let browseRunning = false;
+
+function renderTopics() {
+  const box = $("b-topics");
+  box.innerHTML = "";
+  if (!selectedTopics.size) {
+    const t = document.createElement("span");
+    t.className = "hint tiny";
+    t.textContent = "还没有添加话题";
+    box.appendChild(t);
+    return;
+  }
+  for (const name of selectedTopics) {
+    const el = document.createElement("span");
+    el.className = "chip on";
+    el.appendChild(document.createTextNode(`# ${name}`));
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "✕";
+    x.addEventListener("click", () => {
+      selectedTopics.delete(name);
+      renderTopics();
+    });
+    el.appendChild(x);
+    box.appendChild(el);
+  }
+}
+
+function addTopic() {
+  const input = $("b-topic-input");
+  const v = input.value.trim();
+  if (!v) return;
+  selectedTopics.add(v);
+  input.value = "";
+  renderTopics();
+}
+
+function fmtFans(n) {
+  if (!n) return "0";
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + "亿";
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  return String(n);
+}
+
+function renderUps() {
+  const box = $("b-ups");
+  box.innerHTML = "";
+  if (!selectedUps.size) {
+    const t = document.createElement("span");
+    t.className = "hint tiny";
+    t.textContent = "还没有添加 UP 主 —— 可以只靠关键词或分区逛";
+    box.appendChild(t);
+    return;
+  }
+  for (const [mid, name] of selectedUps) {
+    const el = document.createElement("span");
+    el.className = "chip on";
+    el.appendChild(document.createTextNode(name || mid));
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "✕";
+    x.title = "移除";
+    x.addEventListener("click", () => {
+      selectedUps.delete(mid);
+      renderUps();
+    });
+    el.appendChild(x);
+    box.appendChild(el);
+  }
+}
+
+async function searchUps() {
+  const input = $("b-up-search");
+  const name = input.value.trim();
+  if (!name) return;
+  const box = $("b-up-results");
+  const btn = $("btn-up-search");
+  btn.disabled = true;
+  box.innerHTML = "";
+  const tip = document.createElement("span");
+  tip.className = "hint tiny";
+  tip.textContent = "搜索中…";
+  box.appendChild(tip);
+
+  try {
+    const r = await api(`/api/browse/resolve?name=${encodeURIComponent(name)}`);
+    box.innerHTML = "";
+    if (!r.items || !r.items.length) {
+      tip.textContent = "没搜到这个 UP 主";
+      box.appendChild(tip);
+      return;
+    }
+    for (const u of r.items) {
+      const el = document.createElement("span");
+      el.className = "chip pick";
+      el.textContent = `${u.uname}（${fmtFans(u.fans)}粉）`;
+      el.title = `mid ${u.mid}` + (u.sign ? `\n${u.sign}` : "");
+      el.addEventListener("click", () => {
+        selectedUps.set(String(u.mid), u.uname);
+        renderUps();
+        el.remove();
+      });
+      box.appendChild(el);
+    }
+  } catch (e) {
+    box.innerHTML = "";
+    tip.textContent = "搜索失败：" + e.message;
+    box.appendChild(tip);
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 function buildZoneChips() {
   const box = $("b-zones");
@@ -829,6 +955,14 @@ function bind() {
   $("btn-toggle").addEventListener("click", toggleBot);
   $("btn-browse-toggle").addEventListener("click", toggleBrowse);
   $("btn-browse-round").addEventListener("click", runBrowseRound);
+  $("btn-up-search").addEventListener("click", searchUps);
+  $("b-up-search").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); searchUps(); }
+  });
+  $("btn-topic-add").addEventListener("click", addTopic);
+  $("b-topic-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addTopic(); }
+  });
   $("btn-comment-toggle").addEventListener("click", toggleComments);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);

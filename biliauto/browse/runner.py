@@ -22,9 +22,7 @@ from .source import Candidate, Source
 
 log = logging.getLogger("biliauto.browse.runner")
 
-# 太短的（<60秒）和水视频（<1000 播放）不值得花 token 判断
-MIN_DURATION = 60
-MIN_PLAY = 1000
+# 太短的（默认 <60 秒）不值得花 token 判断；阈值可在后台调
 MAX_ACTIONS_PER_ROUND = 6
 
 
@@ -121,8 +119,8 @@ class BrowseRunner:
     # ---------- 一轮 ----------
     async def round_once(self) -> RoundResult:
         r = RoundResult()
-        if not self.bc.keywords and not self.bc.zones:
-            r.error = "既没配关键词也没选分区，不知道该逛哪儿"
+        if not self.bc.keywords and not self.bc.zones and not self.bc.ups and not self.bc.topics:
+            r.error = "既没配 UP 主/话题/关键词，也没选分区，不知道该逛哪儿"
             return r
 
         try:
@@ -136,13 +134,15 @@ class BrowseRunner:
         for c in cands:
             if self.store.browse_seen(c.bvid):
                 continue
-            if c.duration and c.duration < MIN_DURATION:
+            # 定向来源（话题 / 指定 UP）本来就冷门，别用全局播放门槛砍掉
+            targeted = c.source.startswith(("topic:", "up:"))
+            if c.duration and c.duration < self.bc.min_duration:
                 self.store.record_browse(
                     c.bvid, c.aid, c.title, c.up_mid, c.up_name,
                     c.duration, c.play, c.pubdate, "skip", "too_short",
                 )
                 continue
-            if c.play and c.play < MIN_PLAY:
+            if not targeted and c.play and c.play < self.bc.min_play:
                 self.store.record_browse(
                     c.bvid, c.aid, c.title, c.up_mid, c.up_name,
                     c.duration, c.play, c.pubdate, "skip", "low_play",

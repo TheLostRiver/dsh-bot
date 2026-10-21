@@ -173,9 +173,14 @@ class BrowseConfig:
     batch: int            # 每轮挑几条候选
     max_llm: int          # 每轮最多读几条字幕（烧 token 的大头）
     zones: tuple[str, ...]   # RankType 名字，如 Game / Knowledge / Technology
+    ups: tuple[int, ...]     # 指定 UP 主的 mid，逛他们最近发的视频
+    up_names: tuple[str, ...]  # 与 ups 逐位对应，仅用于后台显示
+    topics: tuple[str, ...]    # 话题名，如「怪物猎人」
     keywords: tuple[str, ...]
     days: int
     order: str            # pubdate / click / dm
+    min_play: int         # 全局来源（排行榜/热门）的播放量门槛
+    min_duration: int     # 太短的视频不值得花 token
     max_subtitle_chars: int
     favorite_folder: str
     like: ActionSpec
@@ -281,9 +286,14 @@ class AppConfig:
                 batch=_int("BROWSE_BATCH", 6),
                 max_llm=_int("BROWSE_MAX_LLM", 3),
                 zones=_csv("BROWSE_ZONES", ""),
+                ups=_ints("BROWSE_UPS", ""),
+                up_names=(),
+                topics=_csv("BROWSE_TOPICS", ""),
                 keywords=_csv("BROWSE_KEYWORDS", ""),
                 days=_int("BROWSE_DAYS", 7),
                 order=_str("BROWSE_ORDER", "pubdate").lower(),
+                min_play=_int("BROWSE_MIN_PLAY", 300),
+                min_duration=_int("BROWSE_MIN_DURATION", 60),
                 max_subtitle_chars=_int("BROWSE_MAX_SUBTITLE_CHARS", 6000),
                 favorite_folder=_str("BROWSE_FAVORITE_FOLDER", "AI 精选"),
                 # 点赞低风险默认开；投币要花硬币、关注改关系，默认关
@@ -501,8 +511,25 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
                 if "keywords" in browse
                 else cfg.browse.keywords
             ),
+            ups=(
+                tuple(int(x) for x in browse.get("ups", []) if str(x).isdigit())
+                if "ups" in browse
+                else cfg.browse.ups
+            ),
+            up_names=(
+                tuple(str(x) for x in browse.get("up_names", []))
+                if "up_names" in browse
+                else cfg.browse.up_names
+            ),
+            topics=(
+                tuple(str(x).strip() for x in browse.get("topics", []) if str(x).strip())
+                if "topics" in browse
+                else cfg.browse.topics
+            ),
             days=_num(browse, "days", cfg.browse.days, int),
             order=_txt(browse, "order", cfg.browse.order),
+            min_play=_num(browse, "min_play", cfg.browse.min_play, int),
+            min_duration=_num(browse, "min_duration", cfg.browse.min_duration, int),
             max_subtitle_chars=_num(
                 browse, "max_subtitle_chars", cfg.browse.max_subtitle_chars, int
             ),

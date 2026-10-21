@@ -164,8 +164,16 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-si
 .chip:hover { border-color: #3d4452; color: var(--text); }
 .chip.on { border-color: var(--accent); color: #cfe0ff; background: #182437; }
 
-/* ---------- 动作矩阵 ---------- */
-.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+.up-add { display: flex; gap: 8px; align-items: center; }
+.up-add input { flex: 1; }
+.chip .x {
+  margin-left: 4px; opacity: .55; font-size: 13px; line-height: 1;
+}
+.chip .x:hover { opacity: 1; color: var(--bad); }
+.chip.pick { border-style: dashed; }
+.chip.pick:hover { border-color: var(--accent); color: #cfe0ff; }
+
+/* ---------- 动作矩阵 ---------- */.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
 .matrix th, .matrix td {
   padding: 8px; border-bottom: 1px solid var(--line); text-align: left;
   vertical-align: middle;
