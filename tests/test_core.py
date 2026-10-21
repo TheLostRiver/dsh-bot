@@ -698,6 +698,18 @@ def test_live_fixes() -> None:
     no_cred = replace(cfg, dry_run=False, bili=replace(cfg.bili, sessdata="", bili_jct=""))
     check("无凭据不应被视为可发送", (not no_cred.dry_run and not no_cred.bili.has_credential))
 
+    # ⑤ 口头禅去重依赖 _recent_replies 被正确填充（修复①后才恢复）
+    store3 = Store(Path(tempfile.mkdtemp()) / "polish.db")
+    bot2 = LiveBot(
+        replace(cfg, dry_run=True, persona=replace(cfg.persona, catchphrase="喵喵")),
+        store3,
+    )
+    bot2._recent_replies.extend(["甲甲甲甲喵喵", "乙乙乙乙喵喵"])
+    check("连续重复的口头禅会被摘掉",
+          bot2._polish("这句话够长了喵喵") == "这句话够长了",
+          bot2._polish("这句话够长了喵喵"))
+    store3.close()
+
 
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
