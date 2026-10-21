@@ -363,6 +363,12 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "pitch": cfg.speech.pitch,
             "max_chars": cfg.speech.max_chars,
             "device": cfg.speech.device,
+            "mix_enabled": cfg.speech.mix_enabled,
+            "mix_input": cfg.speech.mix_input,
+            "mix_output": cfg.speech.mix_output,
+            "mix_mic_gain": cfg.speech.mix_mic_gain,
+            "mix_tts_gain": cfg.speech.mix_tts_gain,
+            "mix_duck": cfg.speech.mix_duck,
         },
         "comments": {
             "enabled": cfg.comments.enabled,
@@ -674,6 +680,44 @@ def create_app() -> FastAPI:
         except Exception as e:
             return {"items": [], "inputs": [], "error": str(e)[:160]}
 
+    # ---------------- 路由自检 ----------------
+    @app.get("/api/audio/diagnose")
+    async def audio_diagnose() -> dict:
+        """判断 AI 的声音到底会不会进直播。"""
+        cfg = AppConfig.load()
+        try:
+            import sounddevice as sd
+
+            outputs, inputs = [], []
+            for idx, d in enumerate(sd.query_devices()):
+                entry = {"index": idx, "name": str(d.get("name") or "")}
+                if d.get("max_output_channels", 0) > 0:
+                    outputs.append(entry)
+                if d.get("max_input_channels", 0) > 0:
+                    inputs.append(entry)
+            try:
+                default_out = str(sd.query_devices(kind="output").get("name") or "")
+            except Exception:
+                default_out = ""
+        except Exception as e:
+            return {
+                "reachable": False,
+                "worst": "warn",
+                "findings": [
+                    {
+                        "level": "warn",
+                        "title": "读不到音频设备",
+                        "detail": f"{type(e).__name__}: {e}",
+                        "fix": "pip install sounddevice",
+                        "code": "no_sounddevice",
+                    }
+                ],
+            }
+
+        from ..audio import diagnose
+
+        return diagnose(cfg.speech, default_out, outputs, inputs).as_dict()
+
     # ---------------- 混音 ----------------
     @app.get("/api/audio/mix")
     async def mix_status() -> dict:
@@ -915,8 +959,37 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _startup() -> None:
-        # 勾了"自动开始值班"才自动跑，默认不偷偷动
         cfg = AppConfig.load()
+
+        # 启动时先判一次"观众到底听不听得到"，把问题写进日志
+        try:
+            from ..audio import diagnose
+
+            import sounddevice as sd
+
+            outputs, inputs = [], []
+            for idx, d in enumerate(sd.query_devices()):
+                entry = {"index": idx, "name": str(d.get("name") or "")}
+                if d.get("max_output_channels", 0) > 0:
+                    outputs.append(entry)
+                if d.get("max_input_channels", 0) > 0:
+                    inputs.append(entry)
+            try:
+                default_out = str(sd.query_devices(kind="output").get("name") or "")
+            except Exception:
+                default_out = ""
+            diag = diagnose(cfg.speech, default_out, outputs, inputs)
+            for f in diag.findings:
+                if f.level in ("warn", "error"):
+                    log.warning("[音频自检] %s：%s", f.title, f.fix or f.detail)
+            log.info(
+                "[音频自检] 观众%s AI 说话",
+                "能听到" if diag.reachable else "听不到",
+            )
+        except Exception as e:
+            log.debug("音频自检跳过：%s", e)
+
+        # 勾了"自动开始值班"才自动跑，默认不偷偷动
         if cfg.comments.enabled and cfg.bili.has_credential:
             try:
                 await comment_mgr.start(cfg)

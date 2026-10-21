@@ -169,6 +169,17 @@
           <label class="full">闪避（AI 说话时把麦克风压低多少）<input id="m-duck" type="number" min="0" max="1" step="0.05" /></label>
         </div>
       </div>
+
+      <div class="card wide">
+        <div class="card-head">
+          <h2>路由自检</h2>
+          <div class="head-actions">
+            <span class="hint tiny" id="diag-summary">检查中…</span>
+            <button class="btn ghost sm" id="btn-diag" type="button">重新检查</button>
+          </div>
+        </div>
+        <div class="diag-list" id="diag-list"></div>
+      </div>
     </section>
 
     <!-- ============ 评论区 ============ -->

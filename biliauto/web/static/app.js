@@ -8,6 +8,7 @@ let statusTimer = null;
 let settingsLoaded = false;
 let botRunning = false;
 let savedVoice = "";
+let savedSpeech = null;
 
 /* ---------------------------------------------------------------- 工具 */
 async function api(path, options = {}) {
@@ -192,6 +193,7 @@ async function loadSettings() {
     $("g-user").value = s.guard.user_cooldown;
     $("g-len").value = s.guard.max_danmaku_len;
 
+    savedSpeech = s.speech;
     $("v-enabled").checked = !!s.speech.enabled;    $("v-backend").value = s.speech.backend;
     savedVoice = s.speech.voice || "";
     $("v-rate").value = s.speech.rate || "";
@@ -510,6 +512,18 @@ function fillDeviceSelect(sel, list) {
   if (keep) sel.value = keep;
 }
 
+function applyDeviceValues() {
+  const sp = savedSpeech;
+  if (!sp) return;
+  const set = (id, v) => {
+    const el = $(id);
+    if (el) el.value = v === null || v === undefined ? "" : String(v);
+  };
+  set("v-device", sp.device);
+  set("m-input", sp.mix_input);
+  set("m-output", sp.mix_output);
+}
+
 async function loadAudioDevices() {
   try {
     const r = await api("/api/audio/devices");
@@ -517,6 +531,7 @@ async function loadAudioDevices() {
     fillDeviceSelect($("m-input"), r.inputs);
     fillDeviceSelect($("m-output"), r.items);
     if (r.error) $("preview-hint").textContent = "音频设备不可用：" + r.error;
+    applyDeviceValues();
   } catch { /* 忽略 */ }
 }
 
@@ -747,6 +762,7 @@ function applyRoute() {
   if (r === "live") {
     refreshSpeechState();
     refreshMix();
+    refreshDiagnose();
   }
   if (r === "logs") refreshLogs();
 }
@@ -1259,6 +1275,53 @@ async function toggleSpeech() {
   }
 }
 
+/* ---------------------------------------------------------------- 路由自检 */
+const DIAG_ICON = { ok: "\u2713", warn: "!", error: "\u2715", info: "i" };
+
+async function refreshDiagnose() {
+  const box = $("diag-list");
+  if (!box) return;
+  try {
+    const r = await api("/api/audio/diagnose");
+    box.innerHTML = "";
+    for (const f of r.findings || []) {
+      const item = document.createElement("div");
+      item.className = "diag-item " + f.level;
+
+      const icon = document.createElement("span");
+      icon.className = "diag-icon";
+      icon.textContent = DIAG_ICON[f.level] || "\u00b7";
+
+      const body = document.createElement("div");
+      body.className = "diag-body";
+      const title = document.createElement("div");
+      title.className = "diag-title";
+      title.textContent = f.title;
+      body.appendChild(title);
+      if (f.detail) {
+        const d = document.createElement("div");
+        d.className = "diag-detail";
+        d.textContent = f.detail;
+        body.appendChild(d);
+      }
+      if (f.fix) {
+        const fix = document.createElement("div");
+        fix.className = "diag-fix";
+        fix.textContent = "\u2192 " + f.fix;
+        body.appendChild(fix);
+      }
+      item.append(icon, body);
+      box.appendChild(item);
+    }
+    $("diag-summary").textContent = r.reachable
+      ? "\u7ed3\u8bba\uff1a\u89c2\u4f17\u80fd\u542c\u5230 AI \u8bf4\u8bdd"
+      : "\u7ed3\u8bba\uff1a\u89c2\u4f17\u76ee\u524d\u542c\u4e0d\u5230 AI \u8bf4\u8bdd";
+  } catch (e) {
+    box.innerHTML = "";
+    box.appendChild(emptyNote("\u81ea\u68c0\u5931\u8d25\uff1a" + e.message));
+  }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -1330,6 +1393,7 @@ function bind() {
   $("btn-comment-toggle").addEventListener("click", toggleComments);
   $("switch-speech").addEventListener("click", toggleSpeech);
   $("btn-mix-test").addEventListener("click", testMix);
+  $("btn-diag").addEventListener("click", refreshDiagnose);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-preview").addEventListener("click", previewVoice);
@@ -1375,6 +1439,7 @@ function bind() {
   await loadSettings();
   await loadVoices();
   await loadAudioDevices();
+  applyVoice(savedVoice);
   await refreshStatus();
   applyRoute();
   refreshLogs();

@@ -541,6 +541,86 @@ def test_mixer() -> None:
     m._stream = None
 
 
+def test_diagnose() -> None:
+    print("\n[路由自检]")
+    from dataclasses import replace
+
+    from biliauto.audio.check import diagnose
+    from biliauto.config import AppConfig
+
+    base = AppConfig.load().speech
+
+    outs = [
+        {"index": 4, "name": "耳机 (Realtek High Definition Audio)"},
+        {"index": 9, "name": "CABLE Input (VB-Audio Virtual Cable)"},
+    ]
+    ins = [
+        {"index": 1, "name": "麦克风 (Realtek High Definition Audio)"},
+        {"index": 8, "name": "CABLE Output (VB-Audio Virtual Cable)"},
+    ]
+
+    def codes(speech, default="耳机 (Realtek High Definition Audio)"):
+        return [f.code for f in diagnose(speech, default, outs, ins).findings]
+
+    # 语音关 / file 模式
+    d = diagnose(replace(base, enabled=False), "耳机", outs, ins)
+    check("语音关闭时给提示", "speech_off" in [f.code for f in d.findings] and not d.reachable)
+
+    d = diagnose(replace(base, enabled=True, backend="file", mix_enabled=False), "耳机", outs, ins)
+    check("file 模式说明不主动播放",
+          "file_mode" in [f.code for f in d.findings] and not d.reachable)
+
+    # play 到物理设备 = 观众听不到
+    d = diagnose(replace(base, enabled=True, backend="play", mix_enabled=False, device=None),
+                 "耳机 (Realtek)", outs, ins)
+    check("默认播到物理设备时警告", "play_default_physical" in codes(
+        replace(base, enabled=True, backend="play", mix_enabled=False, device=None)))
+    check("物理设备判为不可达", d.reachable is False)
+
+    # play 到虚拟声卡 = 可达
+    d = diagnose(replace(base, enabled=True, backend="play", mix_enabled=False, device=9),
+                 "耳机", outs, ins)
+    check("播到虚拟声卡判为可达", d.reachable is True and "play_out_virtual" in [
+        f.code for f in d.findings])
+
+    # 设备序号不存在
+    d = diagnose(replace(base, enabled=True, backend="play", mix_enabled=False, device=999),
+                 "耳机", outs, ins)
+    check("设备不存在报错", "play_out_missing" in [f.code for f in d.findings])
+
+    # 混音：输入真麦 + 输出虚拟声卡 = 可达
+    d = diagnose(
+        replace(base, enabled=True, backend="play", mix_enabled=True,
+                mix_input=1, mix_output=9), "耳机", outs, ins)
+    check("混音正确配置判为可达", d.reachable is True, str([f.code for f in d.findings]))
+    check("混音可达时给结论", "mix_ok" in [f.code for f in d.findings])
+
+    # 混音：输出物理设备
+    d = diagnose(
+        replace(base, enabled=True, backend="play", mix_enabled=True,
+                mix_input=1, mix_output=4), "耳机", outs, ins)
+    check("混音输出到物理设备时警告", "mix_out_physical" in [f.code for f in d.findings])
+    check("混音误配判为不可达", d.reachable is False)
+
+    # 混音：输入输出同一个设备 = 回环
+    d = diagnose(
+        replace(base, enabled=True, backend="play", mix_enabled=True,
+                mix_input=9, mix_output=9), "耳机", outs, ins)
+    check("输入输出相同报回环", "mix_loop" in [f.code for f in d.findings])
+
+    # 混音：麦克风选成虚拟声卡
+    d = diagnose(
+        replace(base, enabled=True, backend="play", mix_enabled=True,
+                mix_input=8, mix_output=9), "耳机", outs, ins)
+    check("麦克风选虚拟声卡时警告", "mix_in_virtual" in [f.code for f in d.findings])
+
+    # 混音：输出设备不存在
+    d = diagnose(
+        replace(base, enabled=True, backend="play", mix_enabled=True,
+                mix_input=1, mix_output=999), "耳机", outs, ins)
+    check("混音输出不存在报错", "mix_out_missing" in [f.code for f in d.findings])
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -568,7 +648,7 @@ def main() -> int:
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
                test_store, test_patterns, test_comments, test_browse,
                test_browse_rebuild, test_browse_fixes, test_mixer,
-               test_sender_clamp):
+               test_diagnose, test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0
