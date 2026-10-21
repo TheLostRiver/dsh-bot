@@ -60,7 +60,35 @@ CREATE TABLE IF NOT EXISTS kv (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- 评论区值班：见过的评论必须有记录，否则每轮扫描会重复回复
+CREATE TABLE IF NOT EXISTS comments_seen (
+    rpid    INTEGER PRIMARY KEY,
+    oid     INTEGER NOT NULL,
+    uid     INTEGER,
+    uname   TEXT,
+    text    TEXT,
+    ctime   REAL,
+    action  TEXT,
+    reason  TEXT,
+    seen_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_oid ON comments_seen(oid);
+
+CREATE TABLE IF NOT EXISTS comment_replies (
+    rpid     INTEGER PRIMARY KEY,
+    oid      INTEGER NOT NULL,
+    uid      INTEGER,
+    incoming TEXT,
+    reply    TEXT,
+    ok       INTEGER NOT NULL DEFAULT 0,
+    error    TEXT,
+    ts       REAL NOT NULL
+);
 """
+
+# 老库升级：usage 表后加的列
+USAGE_COLUMNS = ("danmaku_sent", "llm_calls", "speech_made", "comment_sent")
 
 
 @dataclass(frozen=True)
@@ -86,7 +114,18 @@ class Store:
             self._conn.executescript(SCHEMA)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """给老数据库补列。CREATE TABLE IF NOT EXISTS 不会改已存在的表。"""
+        for col in USAGE_COLUMNS:
+            try:
+                self._conn.execute(
+                    f"ALTER TABLE usage ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"
+                )
+            except sqlite3.OperationalError:
+                pass  # 列已存在
 
     # ---------- 事件 ----------
     def log_event(
@@ -227,7 +266,7 @@ class Store:
         return time.strftime("%Y-%m-%d")
 
     def incr_usage(self, field: str, delta: int = 1) -> int:
-        assert field in {"danmaku_sent", "llm_calls", "speech_made"}
+        assert field in set(USAGE_COLUMNS), field
         day = self._today()
         with self._lock:
             self._conn.execute(
@@ -248,11 +287,85 @@ class Store:
                 "SELECT * FROM usage WHERE day=?", (day,)
             ).fetchone()
         if not row:
-            return {"danmaku_sent": 0, "llm_calls": 0, "speech_made": 0}
+            return {c: 0 for c in USAGE_COLUMNS}
+        return {c: row[c] for c in USAGE_COLUMNS}
+
+    # ---------- 评论区 ----------
+    def seen_comment(self, rpid: int) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM comments_seen WHERE rpid=?", (rpid,)
+            ).fetchone()
+        return row is not None
+
+    def record_comment(
+        self,
+        rpid: int,
+        oid: int,
+        uid: int,
+        uname: str,
+        text: str,
+        ctime: float,
+        action: str,
+        reason: str = "",
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO comments_seen"
+                " (rpid, oid, uid, uname, text, ctime, action, reason, seen_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (rpid, oid, uid, uname, text, ctime, action, reason, time.time()),
+            )
+            self._conn.commit()
+
+    def set_comment_action(self, rpid: int, action: str, reason: str = "") -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE comments_seen SET action=?, reason=? WHERE rpid=?",
+                (action, reason, rpid),
+            )
+            self._conn.commit()
+
+    def log_comment_reply(
+        self,
+        rpid: int,
+        oid: int,
+        uid: int,
+        incoming: str,
+        reply: str,
+        ok: bool,
+        error: str = "",
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO comment_replies"
+                " (rpid, oid, uid, incoming, reply, ok, error, ts)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (rpid, oid, uid, incoming, reply, int(ok), error, time.time()),
+            )
+            self._conn.commit()
+
+    def recent_comment_replies(self, limit: int = 30) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT rpid, oid, uid, incoming, reply, ok, error, ts"
+                " FROM comment_replies ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def comment_stats(self) -> dict:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS total, SUM(ok) AS ok FROM comment_replies"
+            ).fetchone()
+            seen = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM comments_seen"
+            ).fetchone()
         return {
-            "danmaku_sent": row["danmaku_sent"],
-            "llm_calls": row["llm_calls"],
-            "speech_made": row["speech_made"],
+            "replied": row["ok"] or 0,
+            "attempts": row["total"] or 0,
+            "seen": seen["c"] or 0,
         }
 
     # ---------- KV ----------

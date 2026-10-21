@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-bot · 直播互动后台</title>
-<link rel="stylesheet" href="/static/style.css?v=5" />
+<link rel="stylesheet" href="/static/style.css?v=6" />
 </head>
 <body>
 
@@ -150,6 +150,33 @@
       </div>
     </div>
 
+    <!-- 评论区值班 -->
+    <div class="card wide">
+      <div class="card-head">
+        <h2>评论区值班</h2>
+        <div class="head-actions">
+          <span class="hint tiny" id="c-stats">未启动</span>
+          <button class="btn ghost sm" id="btn-comment-scan" type="button">立即扫一轮</button>
+          <button class="btn sm" id="btn-comment-toggle" type="button">启动</button>
+        </div>
+      </div>
+      <p class="hint">轮询主播最近几个视频下的新评论，用 AI 账号接话。读取评论也必须带凭据，所以要先登录。</p>
+      <div class="form-grid">
+        <label class="check full"><input id="c-enabled" type="checkbox" /><span>服务器启动时自动开始值班</span></label>
+        <label>UP 主 UID（0 = 从房号自动推导）<input id="c-upmid" type="number" min="0" /></label>
+        <label>盯最近几个视频<input id="c-videos" type="number" min="1" max="30" /></label>
+        <label>扫描间隔（秒）<input id="c-interval" type="number" min="60" /></label>
+        <label>只回几小时内的<input id="c-lookback" type="number" min="1" step="0.5" /></label>
+        <label>每天最多回几条<input id="c-day" type="number" min="1" /></label>
+        <label>两条最小间隔（秒）<input id="c-gap" type="number" min="10" /></label>
+        <label>评论字数上限<input id="c-len" type="number" min="10" /></label>
+        <label>普通评论回复概率<input id="c-prob" type="number" min="0" max="1" step="0.05" /></label>
+      </div>
+      <div class="replybox" id="comment-replies" style="margin-top:14px">
+        <p class="hint">还没有评论回复记录。</p>
+      </div>
+    </div>
+
     <!-- 日志 -->
     <div class="card wide">
       <div class="card-head">
@@ -193,6 +220,6 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

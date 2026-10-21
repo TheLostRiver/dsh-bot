@@ -179,12 +179,23 @@ async function loadSettings() {
     $("g-user").value = s.guard.user_cooldown;
     $("g-len").value = s.guard.max_danmaku_len;
 
-    $("v-enabled").checked = !!s.speech.enabled;
-    $("v-backend").value = s.speech.backend;
+    $("v-enabled").checked = !!s.speech.enabled;    $("v-backend").value = s.speech.backend;
     savedVoice = s.speech.voice || "";
     $("v-rate").value = s.speech.rate || "";
     $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
+
+    if (s.comments) {
+      $("c-enabled").checked = !!s.comments.enabled;
+      $("c-upmid").value = s.comments.up_mid;
+      $("c-videos").value = s.comments.videos;
+      $("c-interval").value = s.comments.poll_interval;
+      $("c-lookback").value = s.comments.lookback_hours;
+      $("c-day").value = s.comments.max_per_day;
+      $("c-gap").value = s.comments.min_interval;
+      $("c-len").value = s.comments.max_len;
+      $("c-prob").value = s.comments.reply_probability;
+    }
 
     settingsLoaded = true;
   } catch (e) {
@@ -228,6 +239,17 @@ function collectSettings() {
       rate: $("v-rate").value.trim() || "+8%",
       pitch: $("v-pitch").value.trim() || "+0Hz",
       max_chars: Math.trunc(num("v-max", 80)),
+    },
+    comments: {
+      enabled: $("c-enabled").checked,
+      up_mid: Math.max(0, Math.trunc(num("c-upmid", 0))),
+      videos: Math.trunc(num("c-videos", 5)),
+      poll_interval: num("c-interval", 300),
+      lookback_hours: num("c-lookback", 72),
+      max_per_day: Math.trunc(num("c-day", 20)),
+      min_interval: num("c-gap", 90),
+      max_len: Math.trunc(num("c-len", 60)),
+      reply_probability: num("c-prob", 0.5),
     },
   };
 }
@@ -453,6 +475,98 @@ async function runPersonaPreview() {
   }
 }
 
+/* ---------------------------------------------------------------- 评论区 */
+let commentsRunning = false;
+
+async function refreshComments() {
+  try {
+    const c = await api("/api/comments/status");
+    commentsRunning = !!c.running;
+    const btn = $("btn-comment-toggle");
+    btn.textContent = commentsRunning ? "停止" : "启动";
+    btn.classList.toggle("primary", !commentsRunning);
+    btn.classList.toggle("danger", commentsRunning);
+
+    const parts = [];
+    parts.push(commentsRunning ? "值班中" : "未启动");
+    if (c.up_name) parts.push(`主播 ${c.up_name}`);
+    if (c.scans) parts.push(`已扫 ${c.scans} 轮`);
+    if (c.seen) parts.push(`见过 ${c.seen} 条`);
+    if (c.replied) parts.push(`已回 ${c.replied} 条`);
+    if (c.last_scan_at) parts.push(new Date(c.last_scan_at * 1000).toLocaleTimeString() + " 扫过");
+    $("c-stats").textContent = parts.join(" · ");
+  } catch { /* 忽略 */ }
+}
+
+async function toggleComments() {
+  const btn = $("btn-comment-toggle");
+  btn.disabled = true;
+  try {
+    if (commentsRunning) {
+      await api("/api/comments/stop", { method: "POST" });
+      toast("评论区值班已停止");
+    } else {
+      await api("/api/comments/start", { method: "POST" });
+      toast("评论区值班已启动");
+    }
+    await refreshComments();
+  } catch (e) {
+    toast("操作失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function scanComments() {
+  const btn = $("btn-comment-scan");
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = "扫描中…";
+  try {
+    const r = await api("/api/comments/scan", { method: "POST" });
+    const x = r.result || {};
+    if (x.error) {
+      toast("扫描出错：" + x.error);
+    } else {
+      toast(`扫了 ${x.videos} 个视频 / ${x.comments} 条评论，新候选 ${x.candidates}，回复 ${x.replied}`);
+    }
+    await refreshComments();
+    await refreshCommentReplies();
+  } catch (e) {
+    toast("扫描失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function refreshCommentReplies() {
+  try {
+    const r = await api("/api/comments/replies?limit=10");
+    const box = $("comment-replies");
+    if (!r.items || !r.items.length) return;
+    box.innerHTML = "";
+    for (const it of r.items) {
+      const div = document.createElement("div");
+      div.className = "reply " + (it.ok ? "ok" : "fail");
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = new Date(it.ts * 1000).toLocaleString() + " · " + (it.incoming || "");
+      const out = document.createElement("div");
+      out.className = "out";
+      out.textContent = "→ " + (it.reply || "");
+      div.append(who, out);
+      if (!it.ok && it.error) {
+        const err = document.createElement("div");
+        err.className = "err";
+        err.textContent = "发送失败：" + it.error;
+        div.appendChild(err);
+      }
+      box.appendChild(div);
+    }
+  } catch { /* 忽略 */ }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -494,11 +608,12 @@ function bind() {
   });
 
   $("btn-toggle").addEventListener("click", toggleBot);
+  $("btn-comment-toggle").addEventListener("click", toggleComments);
+  $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-preview").addEventListener("click", previewVoice);
 
-  $("btn-preview-persona").addEventListener("click", openPersonaModal);
-  $("btn-pv-close").addEventListener("click", closePersonaModal);
+  $("btn-preview-persona").addEventListener("click", openPersonaModal);  $("btn-pv-close").addEventListener("click", closePersonaModal);
   $("btn-pv-run").addEventListener("click", runPersonaPreview);
   $("btn-pv-clear").addEventListener("click", () => { $("pv-results").innerHTML = ""; });
   $("persona-modal").addEventListener("click", (e) => {
@@ -541,8 +656,11 @@ function bind() {
   await refreshStatus();
   refreshLogs();
   refreshReplies();
+  refreshComments();
+  refreshCommentReplies();
 
   statusTimer = setInterval(refreshStatus, 3000);
   setInterval(refreshLogs, 2000);
   setInterval(refreshReplies, 8000);
+  setInterval(refreshComments, 5000);
 })();

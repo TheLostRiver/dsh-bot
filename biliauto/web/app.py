@@ -221,6 +221,56 @@ async def room_info(cfg: AppConfig) -> dict:
     return data
 
 
+# ---------------------------------------------------------------- 评论区值班
+class CommentManager:
+    def __init__(self) -> None:
+        self.duty = None
+        self.store: Store | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.duty is not None and self.duty.running
+
+    def _build(self, cfg: AppConfig):
+        from ..bili import build_credential
+        from ..comments import CommentDuty
+
+        if self.store is None:
+            self.store = Store(cfg.data_dir / "biliauto.db")
+        credential = build_credential(cfg.bili)
+        return CommentDuty(cfg, self.store, credential=credential)
+
+    async def start(self, cfg: AppConfig) -> None:
+        if self.running:
+            raise RuntimeError("评论区值班已在运行")
+        if not cfg.bili.has_credential:
+            raise RuntimeError("没有登录凭据，评论区读取会触发 412")
+        self.duty = self._build(cfg)
+        self.duty.start()
+
+    async def stop(self) -> None:
+        if self.duty is not None:
+            await self.duty.stop()
+        self.duty = None
+
+    async def scan_now(self, cfg: AppConfig) -> dict:
+        """手动扫一轮。没在跑就临时建一个。"""
+        if self.duty is None:
+            self.duty = self._build(cfg)
+        result = await self.duty.scan_once()
+        self.duty.scans += 1
+        self.duty.last_scan = result.as_dict()
+        self.duty.last_scan_at = time.time()
+        return result.as_dict()
+
+    def snapshot(self) -> dict:
+        if self.duty is None:
+            return {"running": False, "replied": 0, "attempts": 0, "seen": 0}
+        snap = self.duty.snapshot()
+        snap["running"] = self.running
+        return snap
+
+
 # ---------------------------------------------------------------- 应用
 def _settings_payload(cfg: AppConfig) -> dict:
     return {
@@ -254,6 +304,17 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "pitch": cfg.speech.pitch,
             "max_chars": cfg.speech.max_chars,
         },
+        "comments": {
+            "enabled": cfg.comments.enabled,
+            "up_mid": cfg.comments.up_mid,
+            "videos": cfg.comments.videos,
+            "poll_interval": cfg.comments.poll_interval,
+            "lookback_hours": cfg.comments.lookback_hours,
+            "max_per_day": cfg.comments.max_per_day,
+            "min_interval": cfg.comments.min_interval,
+            "max_len": cfg.comments.max_len,
+            "reply_probability": cfg.comments.reply_probability,
+        },
     }
 
 
@@ -264,6 +325,7 @@ def create_app() -> FastAPI:
     buffer = LogBuffer()
     logging.getLogger().addHandler(buffer)
     manager = BotManager()
+    comment_mgr = CommentManager()
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -281,6 +343,7 @@ def create_app() -> FastAPI:
             "account": account,
             "room": room,
             "bot": manager.snapshot(),
+            "comments": comment_mgr.snapshot(),
             "usage": usage,
             "llm": {"model": cfg.llm.model, "ok": cfg.llm.usable},
             "data_dir": str(cfg.data_dir),
@@ -473,6 +536,49 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "max-age=600"},
         )
 
+    # ---------------- 评论区值班 ----------------
+    @app.get("/api/comments/status")
+    async def comments_status() -> dict:
+        return comment_mgr.snapshot()
+
+    @app.post("/api/comments/start")
+    async def comments_start() -> dict:
+        cfg = AppConfig.load()
+        try:
+            await comment_mgr.start(cfg)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except Exception as e:
+            log.exception("评论区启动失败")
+            raise HTTPException(status_code=500, detail=f"启动失败：{e}")
+        return {"ok": True, "comments": comment_mgr.snapshot()}
+
+    @app.post("/api/comments/stop")
+    async def comments_stop() -> dict:
+        await comment_mgr.stop()
+        return {"ok": True, "comments": comment_mgr.snapshot()}
+
+    @app.post("/api/comments/scan")
+    async def comments_scan() -> dict:
+        cfg = AppConfig.load()
+        if not cfg.bili.has_credential:
+            raise HTTPException(status_code=409, detail="没有登录凭据，读评论会触发 412")
+        try:
+            result = await comment_mgr.scan_now(cfg)
+        except Exception as e:
+            log.exception("手动扫描失败")
+            raise HTTPException(status_code=500, detail=f"扫描失败：{e}")
+        return {"ok": True, "result": result, "comments": comment_mgr.snapshot()}
+
+    @app.get("/api/comments/replies")
+    async def comments_replies(limit: int = 20) -> dict:
+        cfg = AppConfig.load()
+        store = Store(cfg.data_dir / "biliauto.db")
+        try:
+            return {"items": store.recent_comment_replies(limit)}
+        finally:
+            store.close()
+
     # ---------------- 观测 ----------------
     @app.get("/api/logs")
     async def logs(after: int = 0, limit: int = 200) -> dict:
@@ -488,9 +594,21 @@ def create_app() -> FastAPI:
         finally:
             store.close()
 
+    @app.on_event("startup")
+    async def _startup() -> None:
+        # 勾了"自动开始值班"才自动跑，默认不偷偷动
+        cfg = AppConfig.load()
+        if cfg.comments.enabled and cfg.bili.has_credential:
+            try:
+                await comment_mgr.start(cfg)
+                log.info("已按配置自动启动评论区值班")
+            except Exception as e:
+                log.warning("自动启动评论区值守失败：%s", e)
+
     @app.on_event("shutdown")
     async def _shutdown() -> None:
         await manager.stop()
+        await comment_mgr.stop()
 
     return app
 

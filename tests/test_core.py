@@ -207,6 +207,62 @@ def test_patterns() -> None:
     check("未配置时回落到默认规则", pats == DEFAULT_IGNORE_PATTERNS, str(pats))
 
 
+def test_comments() -> None:
+    print("\n[评论区值班]")
+    from dataclasses import replace
+
+    from biliauto.comments.collector import CommentEvent
+    from biliauto.comments.duty import CommentBudget, CommentPolicy
+    from biliauto.config import AppConfig
+
+    cfg = AppConfig.load()
+    cc = replace(cfg.comments, lookback_hours=24, reply_probability=0.0)
+    pol = CommentPolicy(cc, cfg.persona, bot_uid=999)
+    pol.up_name = "主播名"
+
+    def ev(text, uid=1, top=True, age_h=1.0):
+        return CommentEvent(
+            rpid=1, oid=1, uid=uid, uname="甲", text=text,
+            ctime=time.time() - age_h * 3600, is_top_level=top, reply_count=0,
+        )
+
+    a, r = pol.classify(ev("你好"))
+    check("纯表情被跳过", pol.classify(ev("[打call]"))[0] == "ignore")
+    check("广告被跳过", pol.classify(ev("加群私信我，代练优惠"))[1] == "ad")
+    check("楼中楼不参与", pol.classify(ev("同意", top=False))[1] == "nested")
+    check("自己的评论不回", pol.classify(ev("我说一句", uid=999))[1] == "self")
+    check("过老的评论不回", pol.classify(ev("这视频真好", age_h=100))[1] == "too_old")
+    check("太短的不回", pol.classify(ev("好"))[1] == "too_short")
+    check("提问必回", pol.classify(ev("这个配装怎么配啊？"))[0] == "reply")
+    check("提到主播必回", pol.classify(ev("主播名这波操作太秀了"))[0] == "reply")
+
+    # 配额
+    tmp = Path(tempfile.mkdtemp()) / "c.db"
+    s = Store(tmp)
+    cc2 = replace(cfg.comments, min_interval=60, max_per_day=1)
+    b = CommentBudget(cc2, s, dry_run=False)
+    ok, _, _ = b.can_send(time.time())
+    check("初始可发", ok)
+    b.note_sent(time.time())
+    ok, wait, why = b.can_send(time.time() + 1)
+    check("冷却拦截", not ok and why == "cooldown" and wait > 50, f"{ok} {wait} {why}")
+
+    s.incr_usage("comment_sent")
+    b2 = CommentBudget(cc2, s, dry_run=False)
+    ok, wait, why = b2.can_send(time.time() + 120)
+    check("每日上限硬拦截", not ok and why == "per_day", f"{ok} {why}")
+
+    # 去重与记录
+    check("未见过", s.seen_comment(12345) is False)
+    s.record_comment(12345, 1, 2, "乙", "好看", time.time(), "considered", "question")
+    check("记录后算见过", s.seen_comment(12345) is True)
+    s.log_comment_reply(12345, 1, 2, "好看", "确实好看", True)
+    stats = s.comment_stats()
+    check("评论回复统计", stats["replied"] == 1 and stats["seen"] == 1, str(stats))
+    check("评论回复可回读", len(s.recent_comment_replies(5)) == 1)
+    s.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -232,7 +288,7 @@ def main() -> int:
     except Exception:
         pass
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
-               test_store, test_patterns, test_sender_clamp):
+               test_store, test_patterns, test_comments, test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0

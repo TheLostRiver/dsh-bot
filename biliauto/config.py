@@ -132,6 +132,19 @@ class GuardConfig:
 
 
 @dataclass(frozen=True)
+class CommentConfig:
+    enabled: bool
+    up_mid: int          # 0 = 自动从 BILI_ROOM_ID 推导主播 UID
+    videos: int          # 盯最近几个视频
+    poll_interval: float  # 每轮扫描间隔（秒）
+    lookback_hours: float  # 只回这么久以内的新评论
+    max_per_day: int
+    min_interval: float
+    max_len: int
+    reply_probability: float
+
+
+@dataclass(frozen=True)
 class SpeechConfig:
     enabled: bool
     backend: str
@@ -151,6 +164,7 @@ class AppConfig:
     persona: PersonaConfig
     trigger: TriggerConfig
     guard: GuardConfig
+    comments: CommentConfig
     speech: SpeechConfig
     dry_run: bool
     log_level: str
@@ -205,6 +219,19 @@ class AppConfig:
                 per_day=_int("SEND_PER_DAY", 180),
                 user_cooldown=_float("USER_COOLDOWN", 240.0),
                 max_danmaku_len=_int("MAX_DANMAKU_LEN", 20),
+            ),
+            comments=CommentConfig(
+                enabled=_bool("COMMENT_ENABLED", False),
+                up_mid=_int("COMMENT_UP_MID", 0),
+                videos=_int("COMMENT_VIDEOS", 5),
+                poll_interval=_float("COMMENT_POLL_INTERVAL", 300.0),
+                lookback_hours=_float("COMMENT_LOOKBACK_HOURS", 72.0),
+                max_per_day=_int("COMMENT_MAX_PER_DAY", 20),
+                min_interval=_float("COMMENT_MIN_INTERVAL", 90.0),
+                max_len=_int("COMMENT_MAX_LEN", 60),
+                reply_probability=min(
+                    max(_float("COMMENT_REPLY_PROBABILITY", 0.5), 0.0), 1.0
+                ),
             ),
             speech=SpeechConfig(
                 enabled=_bool("SPEECH_ENABLED", True),
@@ -320,6 +347,7 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
     trigger = _sub(s, "trigger")
     guard = _sub(s, "guard")
     speech = _sub(s, "speech")
+    comments = _sub(s, "comments")
 
     return replace(
         cfg,
@@ -357,6 +385,32 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
             user_cooldown=_num(guard, "user_cooldown", cfg.guard.user_cooldown),
             max_danmaku_len=_num(
                 guard, "max_danmaku_len", cfg.guard.max_danmaku_len, int
+            ),
+        ),
+        comments=replace(
+            cfg.comments,
+            enabled=_bol(comments, "enabled", cfg.comments.enabled),
+            up_mid=_num(comments, "up_mid", cfg.comments.up_mid, int),
+            videos=_num(comments, "videos", cfg.comments.videos, int),
+            poll_interval=_num(
+                comments, "poll_interval", cfg.comments.poll_interval
+            ),
+            lookback_hours=_num(
+                comments, "lookback_hours", cfg.comments.lookback_hours
+            ),
+            max_per_day=_num(comments, "max_per_day", cfg.comments.max_per_day, int),
+            min_interval=_num(comments, "min_interval", cfg.comments.min_interval),
+            max_len=_num(comments, "max_len", cfg.comments.max_len, int),
+            reply_probability=min(
+                max(
+                    _num(
+                        comments,
+                        "reply_probability",
+                        cfg.comments.reply_probability,
+                    ),
+                    0.0,
+                ),
+                1.0,
             ),
         ),
         speech=replace(
