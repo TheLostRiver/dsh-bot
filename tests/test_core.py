@@ -621,6 +621,84 @@ def test_diagnose() -> None:
     check("混音输出不存在报错", "mix_out_missing" in [f.code for f in d.findings])
 
 
+def test_live_fixes() -> None:
+    """直播互动三个已修复 bug 的回归。"""
+    print("\n[直播互动修复回归]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    from biliauto.bili.actions import DanmakuSender
+    from biliauto.bili.danmaku import LiveClient, LiveEvent
+    from biliauto.bili.response import ok_result
+    from biliauto.config import AppConfig
+    from biliauto.live.bot import LiveBot
+    from biliauto.live.guard import DanmakuBudget
+
+    cfg = AppConfig.load()
+
+    # ① 发弹幕的成功判定：SDK 返回 data，不含 code
+    check("data 形状判成功", ok_result({"mode_info": {}})[0] is True)
+    check("带 code 才核对", ok_result({"code": -101})[0] is False)
+
+    store = Store(Path(tempfile.mkdtemp()) / "live.db")
+    budget = DanmakuBudget(
+        replace(cfg.guard, min_interval=30, per_minute=3, per_day=100),
+        store, dry_run=False,
+    )
+
+    class FakeRoom:
+        async def send_danmaku(self, danmaku, reply_mid=None):
+            return {"mode_info": {"mode": 1}, "rnd": 1}
+
+    sender = DanmakuSender(FakeRoom(), cfg.guard, budget, store, dry_run=False)
+    ok, why = _asyncio.run(sender.send("回归测试弹幕"))
+    check("成功发送被判为成功", ok and why == "ok", f"{ok} {why}")
+    check("成功后才计消耗", store.today_usage()["danmaku_sent"] == 1,
+          str(store.today_usage()))
+    ok2, why2 = budget.check(1)
+    check("成功后进入冷却", not ok2 and why2 == "cooldown", f"{ok2} {why2}")
+    store.close()
+
+    # ② 上下文不能把"正在回的这条"重复塞进去
+    cfg2 = replace(cfg, dry_run=True, trigger=replace(cfg.trigger, reply_probability=1.0))
+    store2 = Store(Path(tempfile.mkdtemp()) / "ctx.db")
+    bot = LiveBot(cfg2, store2)
+
+    def ev(uid, name, text):
+        return LiveEvent(kind="DANMU_MSG", uid=uid, uname=name, text=text)
+
+    async def feed():
+        a = ev(1, "甲", "甲说的第一句？")
+        b = ev(2, "乙", "乙说的第二句？")
+        await bot.handle_event(a)
+        await bot.handle_event(b)
+        return a, bot._build_messages(a)[-1]["content"]
+
+    _a, user = _asyncio.run(feed())
+    check("当前弹幕在上下文里只出现一次", user.count("甲说的第一句？") == 1,
+          str(user.count("甲说的第一句？")))
+    check("更晚到的弹幕仍在上下文里", "乙说的第二句" in user)
+    store2.close()
+
+    # ③ 事件处理函数抛异常不能把连接带崩
+    client = LiveClient(1, credential=None, handler=None)
+    boom = {"called": 0}
+
+    async def bad_handler(_ev):
+        boom["called"] += 1
+        raise RuntimeError("模拟下游故障")
+
+    client.handler = bad_handler
+    handler = client._make_handler("DANMU_MSG")
+    payload = {"info": [[], "测试内容", [123, "某人", 0, 0, 0], [0], []]}
+    _asyncio.run(handler({"data": payload}))
+    check("处理函数异常被吞掉", boom["called"] == 1)
+
+    # ④ 没凭据时拒绝真开播（接口层的同一判断）
+    no_cred = replace(cfg, dry_run=False, bili=replace(cfg.bili, sessdata="", bili_jct=""))
+    check("无凭据不应被视为可发送", (not no_cred.dry_run and not no_cred.bili.has_credential))
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -648,7 +726,7 @@ def main() -> int:
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
                test_store, test_patterns, test_comments, test_browse,
                test_browse_rebuild, test_browse_fixes, test_mixer,
-               test_diagnose, test_sender_clamp):
+               test_diagnose, test_live_fixes, test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0

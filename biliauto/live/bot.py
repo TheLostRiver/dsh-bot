@@ -232,7 +232,10 @@ class LiveBot:
     def _build_messages(self, event) -> list[dict]:
         system = build_system_prompt(self.cfg.persona, self.cfg.guard.max_danmaku_len)
 
-        recent = list(self._context)[:-1][-8:]
+        recent = list(self._context)
+        # 排除正在处理的这一条：context 是按到达顺序追加的，
+        # 处理时它未必还在末尾（后面可能又来了新弹幕），按位置切会切错。
+        recent = [e for e in recent if e is not event][-8:]
         ctx_lines = [
             f"{e.uname}{'（' + e.medal_name + str(e.medal_level) + '）' if e.medal_name else ''}: {e.text}"
             for e in recent

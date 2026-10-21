@@ -18,6 +18,7 @@ from bilibili_api.live import LiveRoom
 from bilibili_api.utils.danmaku import Danmaku
 
 from ..config import GuardConfig, SpeechConfig
+from .response import is_risk, ok_result
 
 log = logging.getLogger("biliauto.actions")
 
@@ -63,22 +64,27 @@ class DanmakuSender:
                 Danmaku(text=text), reply_mid=reply_mid
             )
         except Exception as e:
-            self.budget.note_failed()
-            log.warning("发弹幕异常：%s", e)
-            return False, f"exception:{e}"
+            from .response import error_of
 
-        code = resp.get("code") if isinstance(resp, dict) else None
-        if code == 0:
+            code, msg = error_of(e)
+            self.budget.note_failed()
+            if is_risk(code):
+                log.warning("发弹幕触发风控（%s），冷却拉长", code)
+            else:
+                log.warning("发弹幕异常：%s", msg)
+            return False, f"exception:{msg}"
+
+        # send_danmaku 成功时返回 data 字段（不含 code），没抛异常即成功
+        ok2, detail = ok_result(resp)
+        if ok2:
             self.budget.note_sent(reply_mid or 0)
             self.store.incr_usage("danmaku_sent")
             log.info("已发送弹幕：%s", text)
             return True, "ok"
 
-        msg = resp.get("message") if isinstance(resp, dict) else str(resp)
-        # 常见：-101 未登录、10030 弹幕过长、-412 被风控
         self.budget.note_failed()
-        log.warning("发弹幕被拒 code=%s msg=%s", code, msg)
-        return False, f"code:{code}"
+        log.warning("发弹幕被拒 %s", detail)
+        return False, detail
 
 
 class Speaker:

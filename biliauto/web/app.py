@@ -500,6 +500,12 @@ def create_app() -> FastAPI:
         cfg = AppConfig.load()
         if payload and "dry_run" in payload:
             cfg = replace(cfg, dry_run=bool(payload["dry_run"]))
+        if not cfg.dry_run and not cfg.bili.has_credential:
+            # 别静默降级：界面显示"运行中"，实际一条也发不出去
+            raise HTTPException(
+                status_code=409,
+                detail="没有登录凭据，只能演练。先扫码登录，或勾上演练模式再启动。",
+            )
         try:
             await manager.start(cfg)
         except RuntimeError as e:

@@ -133,8 +133,14 @@ class LiveClient:
             except Exception as e:  # 脏数据不能让推送协程崩
                 log.debug("解析 %s 失败：%s", kind, e)
                 return
-            if event is not None and self.handler is not None:
+            if event is None or self.handler is None:
+                return
+            try:
                 await self.handler(event)
+            except Exception:
+                # 下游出错（比如数据库锁）不能把它抛回 SDK 的收发协程，
+                # 那会把整条弹幕连接带下去
+                log.exception("处理弹幕事件出错（已忽略，连接继续）")
 
         return _on
 

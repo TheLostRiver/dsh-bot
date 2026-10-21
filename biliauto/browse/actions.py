@@ -19,6 +19,7 @@ from bilibili_api import comment as bili_comment
 from bilibili_api import favorite_list, user
 from bilibili_api.video import Video
 
+from ..bili.response import ok_result as _ok
 from ..config import ActionSpec, BrowseConfig
 from .source import Candidate
 
@@ -217,20 +218,3 @@ class InteractionPerformer:
             log.warning("准备收藏夹失败：%s", str(e)[:100])
         return None
 
-
-def _ok(resp) -> tuple[bool, str]:
-    """判断一次操作是否成功。
-
-    bilibili_api 的 operate 类接口**自己会检查 code 并抛异常**，
-    返回值是响应里的 `data` 字段（比如 {"like": 8}），根本不含 code。
-    所以：没抛异常就是成功；若返回里恰好有 code 才再核对一次。
-    """
-    if isinstance(resp, dict):
-        code = resp.get("code")
-        if code is not None:
-            try:
-                if int(code) != 0:
-                    return False, f"code:{code}"
-            except (TypeError, ValueError):
-                pass
-    return True, "ok"
