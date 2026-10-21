@@ -724,12 +724,17 @@ def create_app() -> FastAPI:
 
     @app.get("/api/browse/report")
     async def browse_report() -> dict:
-        """今天的逛站报告（Markdown 原文）。"""
+        """今日逛站报告：结构化的给界面渲染，Markdown 原文留给导出。"""
         cfg = AppConfig.load()
+        store = Store(cfg.data_dir / "biliauto.db")
+        try:
+            items = store.browse_report(40)
+        finally:
+            store.close()
+
         path = cfg.data_dir / "reports" / f"browse-{time.strftime('%Y-%m-%d')}.md"
-        if not path.exists():
-            return {"exists": False, "content": ""}
-        return {"exists": True, "content": path.read_text(encoding="utf-8")}
+        markdown = path.read_text(encoding="utf-8") if path.exists() else ""
+        return {"items": items, "markdown": markdown, "exists": bool(items)}
 
     # ---------------- 观测 ----------------
     @app.get("/api/logs")

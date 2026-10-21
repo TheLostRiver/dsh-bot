@@ -33,7 +33,11 @@ class RoundResult:
     judged: int = 0
     worth: int = 0
     actions: list[dict] = field(default_factory=list)
+    skipped: dict[str, int] = field(default_factory=dict)
     error: str = ""
+
+    def skip(self, reason: str) -> None:
+        self.skipped[reason] = self.skipped.get(reason, 0) + 1
 
     def as_dict(self) -> dict:
         return {
@@ -42,8 +46,23 @@ class RoundResult:
             "judged": self.judged,
             "worth": self.worth,
             "actions": self.actions,
+            "skipped": self.skipped,
             "error": self.error,
         }
+
+
+def filter_candidate(c: Candidate, bc) -> str | None:
+    """返回跳过原因；None 表示值得继续看。
+
+    定向来源（话题 / 指定 UP / 关键词）是用户点名要的，不套全局播放门槛 ——
+    这类视频本来就可能只有个位数播放，用统一阈值会把它们全砍掉。
+    """
+    targeted = c.source.startswith(("topic:", "up:", "search:"))
+    if c.duration and c.duration < bc.min_duration:
+        return "too_short"
+    if not targeted and c.play and c.play < bc.min_play:
+        return "low_play"
+    return None
 
 
 class BrowseRunner:
@@ -131,19 +150,13 @@ class BrowseRunner:
         for c in cands:
             if self.store.browse_seen(c.bvid):
                 continue
-            # 定向来源（话题 / 指定 UP）本来就冷门，别用全局播放门槛砍掉
-            targeted = c.source.startswith(("topic:", "up:"))
-            if c.duration and c.duration < self.bc.min_duration:
+            reason = filter_candidate(c, self.bc)
+            if reason:
                 self.store.record_browse(
                     c.bvid, c.aid, c.title, c.up_mid, c.up_name,
-                    c.duration, c.play, c.pubdate, "skip", "too_short",
+                    c.duration, c.play, c.pubdate, "skip", reason, c.source,
                 )
-                continue
-            if not targeted and c.play and c.play < self.bc.min_play:
-                self.store.record_browse(
-                    c.bvid, c.aid, c.title, c.up_mid, c.up_name,
-                    c.duration, c.play, c.pubdate, "skip", "low_play",
-                )
+                r.skip(reason)
                 continue
             fresh.append(c)
         r.fresh = len(fresh)
@@ -166,7 +179,7 @@ class BrowseRunner:
                 self.store.record_browse(
                     c.bvid, c.aid, c.title, c.up_mid, c.up_name,
                     c.duration, c.play, c.pubdate,
-                    "skip", str((plan or {}).get("reason", "not_worth"))[:80],
+                    "skip", str((plan or {}).get("reason", "not_worth"))[:80], c.source,
                 )
                 continue
 
@@ -181,7 +194,7 @@ class BrowseRunner:
             self.store.record_browse(
                 c.bvid, c.aid, c.title, c.up_mid, c.up_name,
                 c.duration, c.play, c.pubdate, verdict,
-                str(plan.get("reason", ""))[:120],
+                str(plan.get("reason", ""))[:120], c.source,
             )
             self._append_report(c, plan, results)
 

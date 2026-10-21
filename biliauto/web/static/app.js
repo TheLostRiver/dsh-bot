@@ -683,6 +683,67 @@ const ACTIONS = [
   ["comment", "b-comment"],
 ];
 
+const ACTION_META = {
+  like: { label: "点赞", icon: "♥" },
+  favorite: { label: "收藏", icon: "★" },
+  coin: { label: "投币", icon: "◉" },
+  follow: { label: "关注", icon: "＋" },
+  comment: { label: "评论", icon: "❝" },
+};
+
+function fmtPlay(n) {
+  n = n || 0;
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + "亿";
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  return String(n);
+}
+
+function fmtDur(sec) {
+  sec = Math.max(0, Math.trunc(sec || 0));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h}:${String(m % 60).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function timeAgo(ts) {
+  if (!ts) return "";
+  const diff = Date.now() / 1000 - ts;
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.trunc(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.trunc(diff / 3600)} 小时前`;
+  return `${Math.trunc(diff / 86400)} 天前`;
+}
+
+function sourceLabel(src) {
+  if (!src) return "未知来源";
+  const [kind, ...rest] = src.split(":");
+  const val = rest.join(":");
+  if (kind === "search") return `搜索「${val}」`;
+  if (kind === "rank") return `分区 · ${val}`;
+  if (kind === "topic") return `话题 #${val}`;
+  if (kind === "up") return `指定 UP · ${val}`;
+  if (kind === "hot") return "热门";
+  return src;
+}
+
+function actionBadge(action, ok) {
+  const meta = ACTION_META[action] || { label: action, icon: "·" };
+  const el = document.createElement("span");
+  el.className = "badge " + (ACTION_META[action] ? action : "") + (ok ? "" : " bad");
+  el.textContent = `${meta.icon} ${meta.label}${ok ? "" : "✕"}`;
+  return el;
+}
+
+function emptyNote(text) {
+  const p = document.createElement("p");
+  p.className = "empty";
+  p.textContent = text;
+  return p;
+}
 let selectedZones = new Set();
 let selectedUps = new Map(); // mid(字符串) -> uname
 let selectedTopics = new Set();
@@ -832,6 +893,25 @@ async function refreshBrowse() {
     if (acts) bits.push(acts);
     $("b-stats").textContent = bits.join(" · ");
 
+    // 上一轮的明细：跳过原因最有用，不然只会看到「一条都没回」
+    const last = b.last_round || {};
+    const el = $("b-last");
+    if (last.found !== undefined) {
+      const parts = [
+        `上一轮：找到 ${last.found} 条`,
+        `新候选 ${last.fresh ?? 0}`,
+        `判断 ${last.judged ?? 0}`,
+        `值得 ${last.worth ?? 0}`,
+      ];
+      const sk = last.skipped || {};
+      const skText = Object.entries(sk).map(([k, v]) => `${k} ${v}`).join("、");
+      if (skText) parts.push(`跳过（${skText}）`);
+      if (last.error) parts.push(`错误：${last.error}`);
+      el.textContent = parts.join(" · ");
+    } else {
+      el.textContent = "四种来源都是可选的，全不填就逛热门；读字幕要花 token，每轮判断条数是成本阀门。";
+    }
+
     $("ov-like").textContent = t.like || 0;
     $("ov-fav").textContent = t.favorite || 0;
     $("ov-comment").textContent = t.comment || 0;
@@ -868,7 +948,14 @@ async function runBrowseRound() {
     const r = await api("/api/browse/round", { method: "POST" });
     const x = r.result || {};
     if (x.error) toast("出错：" + x.error);
-    else toast(`找到 ${x.found} 条 / 新 ${x.fresh} / 判断 ${x.judged} / 值得 ${x.worth} / 动作 ${(x.actions || []).length}`);
+    else {
+      const sk = x.skipped || {};
+      const skText = Object.entries(sk).map(([k, v]) => `${k} ${v}`).join("、");
+      toast(
+        `找到 ${x.found} / 新 ${x.fresh} / 判断 ${x.judged} / 动作 ${(x.actions || []).length}` +
+          (skText ? ` / 跳过 ${skText}` : "")
+      );
+    }
     await refreshBrowse();
     await refreshBrowseActions();
     await refreshBrowseReport();
@@ -882,25 +969,39 @@ async function runBrowseRound() {
 
 async function refreshBrowseActions() {
   try {
-    const r = await api("/api/browse/actions?limit=20");
+    const r = await api("/api/browse/actions?limit=25");
     const box = $("browse-actions");
-    if (!r.items || !r.items.length) return;
     box.innerHTML = "";
-    const NAMES = { like: "点赞", favorite: "收藏", coin: "投币", follow: "关注", comment: "评论" };
-    for (const it of r.items) {
-      const div = document.createElement("div");
-      div.className = "reply " + (it.ok ? "ok" : "fail");
-      const who = document.createElement("div");
-      who.className = "who";
-      who.textContent =
-        `${new Date(it.ts * 1000).toLocaleTimeString()} · ${NAMES[it.action] || it.action}` +
-        (it.title ? ` · ${String(it.title).slice(0, 26)}` : "");
-      div.appendChild(who);
-      const out = document.createElement("div");
-      out.className = "out";
-      out.textContent = it.ok ? "✅ 已执行" : `❌ ${it.error || "未执行"}`;
-      div.appendChild(out);
-      box.appendChild(div);
+    const items = r.items || [];
+    $("b-act-count").textContent = items.length ? `${items.length} 条` : "";
+    if (!items.length) {
+      box.appendChild(emptyNote("还没有动作记录 —— 逛一轮就有了"));
+      return;
+    }
+    for (const it of items) {
+      const row = document.createElement("div");
+      row.className = "act-row";
+
+      const t = document.createElement("span");
+      t.className = "act-time";
+      t.textContent = new Date(it.ts * 1000).toLocaleTimeString().slice(0, 5);
+
+      const a = document.createElement("a");
+      a.className = "act-title";
+      a.href = `https://www.bilibili.com/video/${it.bvid}`;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.textContent = it.title || it.bvid;
+
+      row.append(t, actionBadge(it.action, it.ok), a);
+      if (!it.ok) {
+        const e = document.createElement("span");
+        e.className = "act-fail";
+        e.textContent = it.error || "未执行";
+        e.title = it.error || "";
+        row.appendChild(e);
+      }
+      box.appendChild(row);
     }
   } catch { /* 忽略 */ }
 }
@@ -908,7 +1009,68 @@ async function refreshBrowseActions() {
 async function refreshBrowseReport() {
   try {
     const r = await api("/api/browse/report");
-    $("browse-report").textContent = r.exists ? r.content : "今天还没有逛站记录。";
+    const box = $("browse-report");
+    box.innerHTML = "";
+    const items = r.items || [];
+    $("b-rep-count").textContent = items.length ? `${items.length} 条` : "";
+    if (!items.length) {
+      box.appendChild(emptyNote("今天还没有逛站记录"));
+      return;
+    }
+
+    for (const it of items) {
+      const entry = document.createElement("div");
+      const okActions = (it.actions || []).filter((x) => x.ok);
+      entry.className = "rp-entry" + (okActions.length ? " has-action" : "");
+
+      const head = document.createElement("div");
+      head.className = "rp-head";
+
+      const link = document.createElement("a");
+      link.className = "rp-title";
+      link.href = `https://www.bilibili.com/video/${it.bvid}`;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = it.title || it.bvid;
+
+      const badges = document.createElement("div");
+      badges.className = "rp-badges";
+      if ((it.actions || []).length) {
+        for (const act of it.actions) badges.appendChild(actionBadge(act.action, act.ok));
+      } else {
+        const b = document.createElement("span");
+        b.className = "badge";
+        b.style.color = "#8b93a4";
+        b.textContent = "看过，未互动";
+        badges.appendChild(b);
+      }
+      head.append(link, badges);
+
+      const meta = document.createElement("div");
+      meta.className = "rp-meta";
+      const bits = [
+        sourceLabel(it.source),
+        `${fmtPlay(it.play)} 播放`,
+        fmtDur(it.duration),
+      ];
+      if (it.up_name) bits.push(it.up_name);
+      bits.push(timeAgo(it.seen_at));
+      for (const b of bits) {
+        const s = document.createElement("span");
+        if (b === sourceLabel(it.source)) s.className = "src";
+        s.textContent = b;
+        meta.appendChild(s);
+      }
+
+      entry.append(head, meta);
+      if (it.reason) {
+        const reason = document.createElement("div");
+        reason.className = "rp-reason";
+        reason.textContent = it.reason;
+        entry.appendChild(reason);
+      }
+      box.appendChild(entry);
+    }
   } catch { /* 忽略 */ }
 }
 
@@ -1020,4 +1182,12 @@ function bind() {
   setInterval(refreshLogs, 2000);
   setInterval(refreshReplies, 8000);
   setInterval(refreshComments, 5000);
+  // 只在逛站页每 15 秒刷新一次动作与报告，避免空转
+  setInterval(() => {
+    if (currentRoute() === "browse") {
+      refreshBrowse();
+      refreshBrowseActions();
+      refreshBrowseReport();
+    }
+  }, 15000);
 })();

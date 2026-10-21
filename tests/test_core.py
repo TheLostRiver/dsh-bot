@@ -337,6 +337,22 @@ def test_browse() -> None:
     check("确实调用了热门来源", calls["hot"] == 1)
 
 
+    # 定向来源不能被全局播放门槛砍掉（搜索出来的常常是个位数播放）
+    from biliauto.browse.runner import filter_candidate
+
+    low = Candidate("BVlo", 1, "小众", 2, "UP", 300, 5, time.time())
+    for src in ("search:大肥鱼", "topic:怪物猎人", "up:123"):
+        c = replace(low, source=src)
+        check(f"{src} 不被播放门槛拦", filter_candidate(c, cfg.browse) is None)
+    check("分区低播放会被拦",
+          filter_candidate(replace(low, source="rank:Game"), cfg.browse) == "low_play")
+    check("热门低播放会被拦",
+          filter_candidate(replace(low, source="hot"), cfg.browse) == "low_play")
+    check("太短一律跳过",
+          filter_candidate(replace(low, source="search:x", duration=10), cfg.browse)
+          == "too_short")
+
+
 def test_browse_rebuild() -> None:
     """手动逛一轮必须用最新配置重建 runner。
 

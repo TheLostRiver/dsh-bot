@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-bot · 管理后台</title>
-<link rel="stylesheet" href="/static/style.css?v=8" />
+<link rel="stylesheet" href="/static/style.css?v=10" />
 </head>
 <body>
 
@@ -214,10 +214,7 @@
           <label>每轮间隔（秒）<input id="b-interval" type="number" min="60" /></label>
           <label>收藏夹名字<input id="b-folder" type="text" /></label>
         </div>
-        <p class="hint tiny">
-          四种来源都是<b>可选</b>的，混用也行：UP 主 / 话题 / 关键词优先，不够再补分区周榜；
-          <b>全都不填就直接逛热门</b>。读字幕要花 token，每轮最多判断「几条字幕」那个数字就是成本阀门。
-        </p>
+        <p class="hint tiny" id="b-last"></p>
       </div>
 
       <div class="card wide">
@@ -268,12 +265,22 @@
 
       <div class="grid">
         <div class="card">
-          <div class="card-head"><h2>最近动作</h2></div>
-          <div class="replybox" id="browse-actions"><p class="hint">还没有动作记录。</p></div>
+          <div class="card-head">
+            <h2>最近动作</h2>
+            <span class="hint tiny" id="b-act-count"></span>
+          </div>
+          <div class="act-list" id="browse-actions">
+            <p class="empty">还没有动作记录</p>
+          </div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>今日报告</h2></div>
-          <pre class="report" id="browse-report">还没有报告。</pre>
+          <div class="card-head">
+            <h2>今日报告</h2>
+            <span class="hint tiny" id="b-rep-count"></span>
+          </div>
+          <div class="report-list" id="browse-report">
+            <p class="empty">今天还没有逛站记录</p>
+          </div>
         </div>
       </div>
     </section>
@@ -368,6 +375,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

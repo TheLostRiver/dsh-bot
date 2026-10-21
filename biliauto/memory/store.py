@@ -159,6 +159,10 @@ class Store:
                 )
             except sqlite3.OperationalError:
                 pass  # 列已存在
+        try:
+            self._conn.execute("ALTER TABLE browse_seen ADD COLUMN source TEXT")
+        except sqlite3.OperationalError:
+            pass
 
     # ---------- 事件 ----------
     def log_event(
@@ -421,15 +425,16 @@ class Store:
         pubdate: float,
         verdict: str,
         reason: str = "",
+        source: str = "",
     ) -> None:
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO browse_seen"
                 " (bvid, aid, title, up_mid, up_name, duration, play, pubdate,"
-                "  seen_at, verdict, reason) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "  seen_at, verdict, reason, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     bvid, aid, title, up_mid, up_name, duration, play,
-                    pubdate, time.time(), verdict, reason,
+                    pubdate, time.time(), verdict, reason, source,
                 ),
             )
             self._conn.commit()
@@ -495,6 +500,52 @@ class Store:
             "actions": acted["c"] or 0,
             "actions_ok": acted["ok"] or 0,
         }
+
+    def browse_report(self, limit: int = 40) -> list[dict]:
+        """今天真正"看过并判断过"的视频，连同它在上面做过的动作。
+
+        比读 Markdown 报告可靠：Markdown 是给人看的产物，这里给 UI 用。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT bvid, title, up_name, source, play, duration,"
+                "       verdict, reason, seen_at, pubdate"
+                " FROM browse_seen"
+                " WHERE verdict != 'skip'"
+                " ORDER BY seen_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            acts = self._conn.execute(
+                "SELECT bvid, action, ok, error, ts FROM browse_actions"
+                " ORDER BY id DESC LIMIT 500"
+            ).fetchall()
+
+        by_bvid: dict[str, list[dict]] = {}
+        for a in acts:
+            by_bvid.setdefault(a["bvid"], []).append(
+                {
+                    "action": a["action"],
+                    "ok": bool(a["ok"]),
+                    "error": a["error"] or "",
+                    "ts": a["ts"],
+                }
+            )
+
+        return [
+            {
+                "bvid": r["bvid"],
+                "title": r["title"] or "",
+                "up_name": r["up_name"] or "",
+                "source": r["source"] or "",
+                "play": r["play"] or 0,
+                "duration": r["duration"] or 0,
+                "verdict": r["verdict"] or "",
+                "reason": r["reason"] or "",
+                "seen_at": r["seen_at"] or 0,
+                "actions": by_bvid.get(r["bvid"], []),
+            }
+            for r in rows
+        ]
 
     # ---------- KV ----------
     def kv_get(self, key: str, default: str = "") -> str:
