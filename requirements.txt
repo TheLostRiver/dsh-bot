@@ -1,0 +1,15 @@
+# 核心依赖
+bilibili-api-python>=17.4.2
+openai>=1.40.0
+python-dotenv>=1.0.1
+edge-tts>=6.1.0
+imageio-ffmpeg>=0.5.1
+httpx>=0.27.0
+
+# Web 管理后台（扫码登录 / 人设 / 配额 / 日志）
+fastapi>=0.115.0
+uvicorn>=0.30.0
+qrcode[pil]>=7.4.0
+
+# 可选：本机播放语音（不装则只落地音频文件，由 OBS 播放）
+# sounddevice>=0.4.6

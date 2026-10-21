@@ -1,0 +1,157 @@
+"""DeepSeek 决策层。
+
+设计要点：模型必须同时给出两条输出，因为它们的物理约束不同：
+  - danmaku: 普通账号弹幕上限约 20 字，超了直接被接口拒发
+  - speech : TTS 稿，可以完整，是"说给观众听"的那一版
+把两者塞进一次结构化 JSON 调用，比调两次便宜也一致。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from dataclasses import dataclass
+
+from openai import AsyncOpenAI
+
+from .config import LLMConfig
+
+log = logging.getLogger("biliauto.llm")
+
+_JSON_HINT = """你必须只输出一个 JSON 对象，不要 markdown、不要解释，格式：
+{"should_reply": true/false, "danmaku": "发到弹幕区的短句", "speech": "说出口的完整话", "mood": "neutral|happy|tease|curious"}"""
+
+
+@dataclass
+class Reply:
+    should_reply: bool
+    danmaku: str = ""
+    speech: str = ""
+    mood: str = "neutral"
+
+
+def _extract_json(raw: str) -> dict | None:
+    """模型偶尔会包 ```json ``` 或加前言，这里做一次宽容提取。"""
+    if not raw:
+        return None
+    text = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+class Brain:
+    """DeepSeek 封装；不可用时自动降级为离线脑子，保证链路能跑通。"""
+
+    def __init__(self, cfg: LLMConfig) -> None:
+        self.cfg = cfg
+        self._client: AsyncOpenAI | None = None
+        if cfg.usable:
+            self._client = AsyncOpenAI(
+                api_key=cfg.api_key, base_url=cfg.base_url, timeout=cfg.timeout
+            )
+
+    @property
+    def online(self) -> bool:
+        return self._client is not None
+
+    async def decide(
+        self, messages: list[dict], max_danmaku_len: int = 20
+    ) -> Reply:
+        if self._client is None:
+            return self._offline_reply(messages)
+        try:
+            resp = await self._client.chat.completions.create(
+                model=self.cfg.model,
+                messages=messages,
+                temperature=self.cfg.temperature,
+                max_tokens=self.cfg.max_tokens,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:  # 网络/限流/额度，任何一种都不该让直播挂掉
+            log.warning("DeepSeek 调用失败，本轮跳过：%s", e)
+            return Reply(should_reply=False)
+
+        raw = (resp.choices[0].message.content or "").strip()
+        data = _extract_json(raw)
+        if data is None:
+            log.warning("模型返回无法解析为 JSON：%r", raw[:200])
+            return Reply(should_reply=False)
+
+        return self._coerce(data, max_danmaku_len)
+
+    # ---------- 内部 ----------
+    @staticmethod
+    def _coerce(data: dict, max_danmaku_len: int) -> Reply:
+        should = bool(data.get("should_reply", False))
+        danmaku = str(data.get("danmaku") or "").strip()
+        speech = str(data.get("speech") or "").strip()
+        mood = str(data.get("mood") or "neutral").strip()
+
+        # 弹幕硬截断：宁可少说，也不要被接口拒发
+        if len(danmaku) > max_danmaku_len:
+            danmaku = danmaku[:max_danmaku_len]
+        # 没有弹幕文案但有语音稿时，用语音稿头部兜底
+        if should and not danmaku and speech:
+            danmaku = speech[:max_danmaku_len]
+        if should and not danmaku and not speech:
+            return Reply(should_reply=False)
+        return Reply(should_reply=should, danmaku=danmaku, speech=speech or danmaku, mood=mood)
+
+    @staticmethod
+    def _offline_reply(messages: list[dict]) -> Reply:
+        """没有 API Key 时的占位逻辑，仅用于验证管线是否连通。"""
+        user_msg = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        # 从"【现在】xxx 说：yyy"里把 yyy 抠出来，方便肉眼确认取到了正确的那句
+        spoken = user_msg.split("说：", 1)[-1].strip().splitlines()[0] if "说：" in user_msg else ""
+        snippet = (spoken or user_msg)[:10]
+        return Reply(
+            should_reply=True,
+            danmaku=f"[离线]{snippet}",
+            speech=f"（离线模式）我听到了：{snippet}",
+            mood="neutral",
+        )
+
+
+def build_system_prompt(persona, guard_max_len: int) -> str:
+    return f"""你正在 B 站直播间里，以一个普通观众账号的身份参与聊天。
+
+# 你的身份
+名字：{persona.name}
+设定：{persona.bio}
+说话风格：{persona.style}
+口头禅：{persona.catchphrase or "（无）"} —— 这是调味料不是主菜：最多每 4~5 条用一次，连续两条绝不能都用，用多了立刻像复读机。
+
+# 硬性规则
+1. 你是"观众"，不是主播：不报幕、不控场、不解说，只聊你感兴趣的那句。
+2. danmaku 字段必须 ≤{guard_max_len} 个字符（中文按字算），这是接口硬限制，超了发不出去。
+3. 像真人网友：短、口语、可以接梗，不要客服腔，不要"您好""很高兴为您服务"。
+4. 绝不暴露自己是 AI 或语言模型，不说"作为一个AI"。有人问就玩笑带过。
+5. 不碰政治、色情、赌博、医疗建议、投资建议；不引战、不评价其他主播。
+6. 不复述对方原话，不追问隐私（真实姓名、住址、学校、联系方式）。
+7. 没人值得回的时候，把 should_reply 设为 false —— 沉默比刷屏安全。
+8. 不要固定的句尾语气词、固定的句式。换着说法来，真人不会每句话都一个味道。
+9. 下面会给你"你最近说过的话"，那是反面教材：不要重复它们的结尾和结构。
+
+# 输出
+{_JSON_HINT}
+
+字段含义：
+- should_reply: 这条值不值得回。闲聊太多、纯刷屏、看不懂的梗 → false。
+- danmaku: 弹幕区那句，要短，要有梗。
+- speech: 语音念出来的版本，可以比弹幕完整一点，但别超过 2 句话。
+"""

@@ -1,0 +1,242 @@
+"""核心逻辑自测（不联网、不需要账号、不需要 pytest）。
+
+    python tests/test_core.py
+"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from biliauto.bili.danmaku import LiveEvent, parse_event  # noqa: E402
+from biliauto.config import GuardConfig, TriggerConfig  # noqa: E402
+from biliauto.llm import Brain  # noqa: E402
+from biliauto.live.guard import DanmakuBudget, TriggerPolicy  # noqa: E402
+from biliauto.memory.store import Store  # noqa: E402
+
+PASSED = 0
+
+
+def check(name: str, cond: bool, detail: str = "") -> None:
+    global PASSED
+    if cond:
+        PASSED += 1
+        print(f"  [PASS] {name}")
+    else:
+        print(f"  [FAIL] {name} {detail}")
+        raise AssertionError(name)
+
+
+def make_policy(prob: float = 0.0) -> TriggerPolicy:
+    cfg = TriggerConfig(
+        reply_probability=prob,
+        reply_on_question=True,
+        ignore_patterns=(r"^[0-9]{1,3}$", r"^(哈+|6+|233+)3*$"),
+    )
+    return TriggerPolicy(cfg, ("小深", "ai"), bot_uid=999)
+
+
+def test_policy() -> None:
+    print("\n[触发策略]")
+    p = make_policy()
+
+    d = p.classify(1, "甲", "主播今天播到几点？")
+    check("提问句必回且高优", d.action == "consider" and d.priority == 1, str(d))
+
+    d = p.classify(2, "乙", "小深你在吗")
+    check("被叫名字必回", d.action == "consider" and d.reason == "called", str(d))
+
+    d = p.classify(999, "自己", "我在说话")
+    check("不回复自己", d.action == "ignore" and d.reason == "self", str(d))
+
+    d = p.classify(3, "丙", "666")
+    check("刷屏数字被过滤", d.action == "ignore" and d.reason == "noise", str(d))
+
+    d = p.classify(4, "丁", "哈哈哈")
+    check("无意义叠字被过滤", d.action == "ignore", str(d))
+
+    d = p.classify(5, "戊", "今天天气不错")
+    check("低概率下普通闲聊不打扰", d.action == "ignore", str(d))
+
+    d = p.classify(6, "富哥", "打赏了", "SUPER_CHAT_MESSAGE")
+    check("SC 最高优先", d.action == "consider" and d.priority == 2, str(d))
+
+    d = p.classify(7, "新人", "开通了舰长", "GUARD_BUY")
+    check("上舰最高优先", d.action == "consider" and d.priority == 2, str(d))
+
+
+def test_budget() -> None:
+    print("\n[发送配额]")
+    tmp = Path(tempfile.mkdtemp()) / "t.db"
+    store = Store(tmp)
+    cfg = GuardConfig(
+        min_interval=10, per_minute=2, per_hour=5, per_day=3,
+        user_cooldown=60, max_danmaku_len=20,
+    )
+    b = DanmakuBudget(cfg, store, dry_run=False)
+    now = time.time()
+
+    ok, wait, _ = b.evaluate(1, now)
+    check("初始可发", ok and wait == 0)
+
+    b.note_sent(1, now)
+    ok, wait, reason = b.evaluate(2, now + 1)
+    check("冷却期内不发并给出等待时间",
+          not ok and reason == "cooldown" and 8 < wait <= 10, f"{ok} {wait} {reason}")
+
+    ok, _, _ = b.evaluate(2, now + 11)
+    check("冷却结束后可发", ok)
+
+    ok, _, reason = b.evaluate(1, now + 11)
+    check("同一观众冷却生效", not ok and reason == "user_cooldown", reason)
+
+    # 每日上限是硬墙，等待也没用
+    for i in range(3):
+        store.incr_usage("danmaku_sent")
+    b2 = DanmakuBudget(cfg, store, dry_run=False)
+    ok, wait, reason = b2.evaluate(3, now)
+    check("日上限硬拦截", not ok and reason == "per_day" and wait == float("inf"), reason)
+
+    # dry-run 不消耗真实配额
+    b3 = DanmakuBudget(cfg, store, dry_run=True)
+    ok, _, _ = b3.evaluate(3, now)
+    check("dry-run 不受日上限限制", ok)
+    store.close()
+
+
+def test_llm_coerce() -> None:
+    print("\n[模型输出规整]")
+    r = Brain._coerce(
+        {"should_reply": True, "danmaku": "这句话故意写得很长很长很长超过二十个字了吧", "speech": "完整稿"},
+        max_danmaku_len=20,
+    )
+    check("超长弹幕被截断到 20 字", len(r.danmaku) == 20, f"len={len(r.danmaku)}")
+    check("语音稿保留完整", r.speech == "完整稿")
+
+    r = Brain._coerce({"should_reply": False, "danmaku": "x", "speech": "y"}, 20)
+    check("模型选择沉默", r.should_reply is False)
+
+    r = Brain._coerce({"should_reply": True, "danmaku": "", "speech": ""}, 20)
+    check("空回复视为沉默，避免发空弹幕", r.should_reply is False)
+
+    r = Brain._coerce({"should_reply": True, "danmaku": "", "speech": "只有语音"}, 20)
+    check("只有语音时用语音头兜底弹幕", r.danmaku == "只有语音")
+
+    from biliauto.llm import _extract_json
+
+    check("能解析被 ``` 包裹的 JSON",
+          _extract_json('```json\n{"a":1}\n```') == {"a": 1})
+    check("能解析带前言的 JSON",
+          (_extract_json('好的，结果如下：{"a": 2}') or {}).get("a") == 2)
+    check("脏输出返回 None", _extract_json("完全不是 json") is None)
+
+
+def test_parse() -> None:
+    print("\n[弹幕解析]")
+    raw = {
+        "info": [
+            [0, 1, 25, 16777215],
+            "好家伙这也太强了",
+            [12345, "测试用户", 0, 0, 0, 10000, 1, ""],
+            [12, "主播名", 888, "粉丝牌", 0],
+            [10, 0, 0, 0, 0],
+        ]
+    }
+    e = parse_event("DANMU_MSG", raw)
+    check("解析出内容", e is not None and e.text == "好家伙这也太强了")
+    check("解析出 UID", e.uid == 12345, str(e.uid))
+    check("解析出用户名", e.uname == "测试用户")
+    check("解析出粉丝牌等级", e.medal_level == 12, str(e.medal_level))
+
+    check("空消息返回 None", parse_event("DANMU_MSG", {"info": []}) is None)
+    check("残缺结构不崩溃", parse_event("DANMU_MSG", {"info": ["x", "有内容"]}) is not None)
+
+    sc = parse_event("SUPER_CHAT_MESSAGE", {
+        "data": {"uid": 1, "message": "加油", "user_info": {"uname": "老板"}}
+    })
+    check("SC 被识别为付费事件", sc is not None and sc.is_paid, str(sc))
+    check("SC 文本正确", sc.text == "加油")
+
+
+def test_store() -> None:
+    print("\n[持久化]")
+    tmp = Path(tempfile.mkdtemp()) / "s.db"
+    s = Store(tmp)
+    eid = s.log_event("DANMU_MSG", 1, "甲", "你好")
+    check("事件落库", eid > 0)
+
+    s.touch_viewer(1, "甲")
+    s.touch_viewer(1, "甲")
+    prof = s.viewer_profile(1)
+    check("观众发言计数", prof and prof["msg_count"] == 2, str(prof))
+
+    s.log_reply(eid, 1, "回一句", "回一句语音", True)
+    stats = s.reply_stats()
+    check("回复统计", stats["total"] == 1 and stats["ok"] == 1, str(stats))
+
+    s.incr_usage("danmaku_sent")
+    check("用量累加", s.today_usage()["danmaku_sent"] == 1)
+
+    s.kv_set("k", "v")
+    check("KV 读写", s.kv_get("k") == "v")
+    s.close()
+
+
+def test_patterns() -> None:
+    print("\n[忽略规则解析]")
+    from biliauto.config import DEFAULT_IGNORE_PATTERNS, _patterns, _split_patterns
+
+    # 这是真踩过的坑：{1,3} 里的逗号不能当分隔符
+    got = _split_patterns(r"^[0-9]{1,3}$,^abc$")
+    check("保留 {1,3} 里的逗号", got == (r"^[0-9]{1,3}$", "^abc$"), str(got))
+
+    got = _split_patterns("^a$\n^b$")
+    check("支持换行分隔", got == ("^a$", "^b$"), str(got))
+
+    for pat in DEFAULT_IGNORE_PATTERNS:
+        import re
+
+        re.compile(pat)
+    check("内置规则全部是合法正则", True)
+
+    pats = _patterns("IGNORE_PATTERNS__NOT_SET", DEFAULT_IGNORE_PATTERNS)
+    check("未配置时回落到默认规则", pats == DEFAULT_IGNORE_PATTERNS, str(pats))
+
+
+def test_sender_clamp() -> None:
+    print("\n[发送前的保护]")
+    from biliauto.bili.actions import DanmakuSender
+
+    tmp = Path(tempfile.mkdtemp()) / "c.db"
+    store = Store(tmp)
+    cfg = GuardConfig(
+        min_interval=0, per_minute=99, per_hour=99, per_day=99,
+        user_cooldown=0, max_danmaku_len=6,
+    )
+    budget = DanmakuBudget(cfg, store, dry_run=True)
+    sender = DanmakuSender(None, cfg, budget, store, dry_run=True)
+
+    check("超长文本被截断", sender.clamp("一二三四五六七八九十") == "一二三四五六")
+    check("换行被压成空格", sender.clamp("a\n\nb") == "a b")
+    check("全空白返回空串", sender.clamp("   \n ") == "")
+    store.close()
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
+               test_store, test_patterns, test_sender_clamp):
+        fn()
+    print(f"\n全部通过：{PASSED} 项断言")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

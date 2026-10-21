@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-bot · 直播互动后台</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot" id="conn-dot"></span>
+    <h1>dsh-bot</h1>
+    <span class="sub">DeepSeek 自主运营 B 站 · 直播互动</span>
+  </div>
+  <div class="topbar-right">
+    <div class="pill" id="pill-account">账号：未登录</div>
+    <div class="pill" id="pill-room">直播间：—</div>
+    <button class="btn ghost" id="btn-toggle">启动</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner hidden"></div>
+
+  <section class="grid">
+
+    <!-- 登录 -->
+    <div class="card" id="card-login">
+      <div class="card-head">
+        <h2>AI 账号登录</h2>
+        <button class="btn ghost sm" id="btn-logout">退出登录</button>
+      </div>
+      <div class="login-body">
+        <div class="qr-wrap">
+          <img id="qr-img" alt="登录二维码" class="hidden" />
+          <div id="qr-placeholder" class="qr-placeholder">用手机 B 站扫码</div>
+        </div>
+        <div class="login-side">
+          <p class="hint">扫码后选择「<b>记住我 / 长期</b>」那张，否则第二天就得重扫。</p>
+          <p class="login-state" id="login-state">未登录</p>
+          <button class="btn" id="btn-login">生成二维码</button>
+          <p class="hint tiny">凭据只存本机 <code>data/credentials.json</code>，不会回显到页面，也不上传。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 运行状态 -->
+    <div class="card">
+      <div class="card-head"><h2>运行状态</h2></div>
+      <dl class="stat-list">
+        <div><dt>回复</dt><dd id="st-replied">0</dd></div>
+        <div><dt>忽略</dt><dd id="st-ignored">0</dd></div>
+        <div><dt>候选</dt><dd id="st-considered">0</dd></div>
+        <div><dt>排队</dt><dd id="st-queued">0</dd></div>
+        <div><dt>今日已发</dt><dd id="st-sent">0</dd></div>
+        <div><dt>已运行</dt><dd id="st-uptime">—</dd></div>
+      </dl>
+    </div>
+
+    <!-- 人设 -->
+    <div class="card wide">
+      <div class="card-head">
+        <h2>人设</h2>
+        <span class="hint tiny">决定它说话像谁 —— 改完点保存</span>
+      </div>
+      <div class="form-grid">
+        <label>角色名<input id="p-name" type="text" /></label>
+        <label>口头禅<input id="p-catch" type="text" placeholder="留空则不使用" /></label>
+        <label class="full">说话风格<textarea id="p-style" rows="2"></textarea></label>
+        <label class="full">设定<textarea id="p-bio" rows="3"></textarea></label>
+        <label class="full">别名（命中就必回，逗号分隔）<input id="p-aliases" type="text" /></label>
+      </div>
+    </div>
+
+    <!-- 目标直播间 -->
+    <div class="card">
+      <div class="card-head"><h2>目标直播间</h2></div>
+      <div class="form-grid">
+        <label class="full">房号<input id="s-room" type="number" min="0" /></label>
+        <label class="check full"><input id="s-dryrun" type="checkbox" /><span>演练模式（只决策不发弹幕）</span></label>
+      </div>
+      <p class="hint tiny">填你自己的直播间数字 ID，跟 AI 账号无关。</p>
+    </div>
+
+    <!-- 触发策略 -->
+    <div class="card">
+      <div class="card-head"><h2>触发策略</h2></div>
+      <div class="form-grid">
+        <label class="full">
+          普通闲聊回复概率
+          <div class="range-row">
+            <input id="t-prob" type="range" min="0" max="1" step="0.01" />
+            <output id="t-prob-out">0.12</output>
+          </div>
+        </label>
+        <label class="check full"><input id="t-question" type="checkbox" /><span>提问必回</span></label>
+        <label class="full">忽略规则（一行一个正则）<textarea id="t-ignore" rows="4" spellcheck="false"></textarea></label>
+      </div>
+      <p class="hint tiny">SC、上舰、被叫名字 不受概率影响，最高优先。</p>
+    </div>
+
+    <!-- 配额 -->
+    <div class="card">
+      <div class="card-head">
+        <h2>发送配额</h2>
+        <span class="hint tiny">账号的生命线</span>
+      </div>
+      <div class="form-grid two">
+        <label>最小间隔（秒）<input id="g-interval" type="number" min="1" step="1" /></label>
+        <label>每分钟上限<input id="g-minute" type="number" min="1" /></label>
+        <label>每小时上限<input id="g-hour" type="number" min="1" /></label>
+        <label>每天上限<input id="g-day" type="number" min="1" /></label>
+        <label>同人冷却（秒）<input id="g-user" type="number" min="0" /></label>
+        <label>弹幕字数上限<input id="g-len" type="number" min="4" /></label>
+      </div>
+    </div>
+
+    <!-- 语音 -->
+    <div class="card">
+      <div class="card-head"><h2>语音播报</h2></div>
+      <div class="form-grid">
+        <label class="check full"><input id="v-enabled" type="checkbox" /><span>开启 TTS</span></label>
+        <label>输出方式
+          <select id="v-backend">
+            <option value="file">file · 只落 mp3（给 OBS）</option>
+            <option value="play">play · 本机播放（配 VB-Cable）</option>
+          </select>
+        </label>
+        <label>音色<input id="v-voice" type="text" /></label>
+        <label>语速<input id="v-rate" type="text" placeholder="+8%" /></label>
+        <label>最长字数<input id="v-max" type="number" min="10" /></label>
+      </div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="card wide">
+      <div class="card-head">
+        <h2>实时日志</h2>
+        <button class="btn ghost sm" id="btn-clear-log">清屏</button>
+      </div>
+      <div class="logbox" id="logbox"></div>
+    </div>
+
+    <!-- 最近回复 -->
+    <div class="card wide">
+      <div class="card-head"><h2>最近回复</h2></div>
+      <div class="replybox" id="replybox"><p class="hint">还没有回复记录。</p></div>
+    </div>
+
+  </section>
+
+  <div class="savebar">
+    <span class="hint" id="save-hint">改完记得保存</span>
+    <button class="btn primary" id="btn-save">保存设置</button>
+  </div>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
