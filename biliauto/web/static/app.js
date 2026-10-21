@@ -197,6 +197,18 @@ async function loadSettings() {
     $("v-rate").value = s.speech.rate || "";
     $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
+    if ($("m-enabled")) {
+      $("m-enabled").checked = !!s.speech.mix_enabled;
+      $("m-input").value =
+        s.speech.mix_input === null || s.speech.mix_input === undefined
+          ? "" : String(s.speech.mix_input);
+      $("m-output").value =
+        s.speech.mix_output === null || s.speech.mix_output === undefined
+          ? "" : String(s.speech.mix_output);
+      $("m-mic").value = s.speech.mix_mic_gain ?? 1;
+      $("m-tts").value = s.speech.mix_tts_gain ?? 1;
+      $("m-duck").value = s.speech.mix_duck ?? 0.85;
+    }
     if ($("v-device")) {
       $("v-device").value =
         s.speech.device === null || s.speech.device === undefined
@@ -284,6 +296,12 @@ function collectSettings() {
       pitch: $("v-pitch").value.trim() || "+0Hz",
       max_chars: Math.trunc(num("v-max", 80)),
       device: $("v-device") && $("v-device").value ? Number($("v-device").value) : null,
+      mix_enabled: $("m-enabled").checked,
+      mix_input: $("m-input").value ? Number($("m-input").value) : null,
+      mix_output: $("m-output").value ? Number($("m-output").value) : null,
+      mix_mic_gain: num("m-mic", 1),
+      mix_tts_gain: num("m-tts", 1),
+      mix_duck: num("m-duck", 0.85),
     },
     comments: {
       enabled: $("c-enabled").checked,
@@ -479,22 +497,54 @@ async function previewVoice() {
 }
 
 /* ---------------------------------------------------------------- 音频设备 */
-async function loadAudioDevices() {
-  const sel = $("v-device");
+function fillDeviceSelect(sel, list) {
   if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">系统默认</option>';
+  for (const d of list || []) {
+    const o = document.createElement("option");
+    o.value = String(d.index);
+    o.textContent = `[${d.index}] ${d.name}`;
+    sel.appendChild(o);
+  }
+  if (keep) sel.value = keep;
+}
+
+async function loadAudioDevices() {
   try {
     const r = await api("/api/audio/devices");
-    const keep = sel.value;
-    sel.innerHTML = '<option value="">系统默认</option>';
-    for (const d of r.items || []) {
-      const o = document.createElement("option");
-      o.value = String(d.index);
-      o.textContent = `[${d.index}] ${d.name}`;
-      sel.appendChild(o);
-    }
-    if (keep) sel.value = keep;
+    fillDeviceSelect($("v-device"), r.items);
+    fillDeviceSelect($("m-input"), r.inputs);
+    fillDeviceSelect($("m-output"), r.items);
     if (r.error) $("preview-hint").textContent = "音频设备不可用：" + r.error;
   } catch { /* 忽略 */ }
+}
+
+async function refreshMix() {
+  try {
+    const m = await api("/api/audio/mix");
+    const bits = [m.running ? "混音中" : "未开启"];
+    if (m.queued_seconds) bits.push(`待播 ${m.queued_seconds}s`);
+    if (m.frames) bits.push(`已处理 ${m.frames} 帧`);
+    $("mix-state").textContent = bits.join(" · ");
+  } catch { /* 忽略 */ }
+}
+
+async function testMix() {
+  const btn = $("btn-mix-test");
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = "测试中…";
+  try {
+    const r = await api("/api/audio/mix/test", { method: "POST" });
+    toast(r.message || "已送出测试语音");
+    await refreshMix();
+  } catch (e) {
+    toast("混音测试失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
 }
 
 /* ---------------------------------------------------------------- 人设预览 */
@@ -694,7 +744,10 @@ function applyRoute() {
     refreshBrowseReport();
   }
   if (r === "history") loadHistory(true);
-  if (r === "live") refreshSpeechState();
+  if (r === "live") {
+    refreshSpeechState();
+    refreshMix();
+  }
   if (r === "logs") refreshLogs();
 }
 
@@ -1276,6 +1329,7 @@ function bind() {
 
   $("btn-comment-toggle").addEventListener("click", toggleComments);
   $("switch-speech").addEventListener("click", toggleSpeech);
+  $("btn-mix-test").addEventListener("click", testMix);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-preview").addEventListener("click", previewVoice);

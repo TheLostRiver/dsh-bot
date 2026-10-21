@@ -201,6 +201,13 @@ class SpeechConfig:
     device: int | None
     max_chars: int
     out_dir: Path
+    # 实时混音：把麦克风和 TTS 混成一路送给直播姬/OBS
+    mix_enabled: bool
+    mix_input: int | None
+    mix_output: int | None
+    mix_mic_gain: float
+    mix_tts_gain: float
+    mix_duck: float
 
 
 @dataclass(frozen=True)
@@ -313,6 +320,12 @@ class AppConfig:
                 device=device,
                 max_chars=_int("SPEECH_MAX_CHARS", 80),
                 out_dir=data_dir / "speech",
+                mix_enabled=_bool("SPEECH_MIX_ENABLED", False),
+                mix_input=(_int("SPEECH_MIX_INPUT", -1) if _str("SPEECH_MIX_INPUT") else None),
+                mix_output=(_int("SPEECH_MIX_OUTPUT", -1) if _str("SPEECH_MIX_OUTPUT") else None),
+                mix_mic_gain=_float("SPEECH_MIX_MIC_GAIN", 1.0),
+                mix_tts_gain=_float("SPEECH_MIX_TTS_GAIN", 1.0),
+                mix_duck=_float("SPEECH_MIX_DUCK", 0.85),
             ),
             dry_run=_bool("DRY_RUN", False),
             log_level=_str("LOG_LEVEL", "INFO").upper(),
@@ -408,6 +421,19 @@ def _apply_credential(cfg: AppConfig, cred: dict) -> AppConfig:
             bot_uid=bot_uid,
         ),
     )
+
+
+def _opt_int(src: dict, key: str, default: int | None) -> int | None:
+    """允许 None（= 用系统默认设备）的整数解析。"""
+    if key not in src:
+        return default
+    v = src.get(key)
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
 
 
 def _action(src: dict, key: str, default: ActionSpec) -> ActionSpec:
@@ -550,11 +576,13 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
             rate=_txt(speech, "rate", cfg.speech.rate),
             pitch=_txt(speech, "pitch", cfg.speech.pitch),
             max_chars=_num(speech, "max_chars", cfg.speech.max_chars, int),
-            device=(
-                int(speech["device"])
-                if str(speech.get("device", "")).strip().lstrip("-").isdigit()
-                else None
-            ),
+            device=_opt_int(speech, "device", cfg.speech.device),
+            mix_enabled=_bol(speech, "mix_enabled", cfg.speech.mix_enabled),
+            mix_input=_opt_int(speech, "mix_input", cfg.speech.mix_input),
+            mix_output=_opt_int(speech, "mix_output", cfg.speech.mix_output),
+            mix_mic_gain=_num(speech, "mix_mic_gain", cfg.speech.mix_mic_gain),
+            mix_tts_gain=_num(speech, "mix_tts_gain", cfg.speech.mix_tts_gain),
+            mix_duck=min(max(_num(speech, "mix_duck", cfg.speech.mix_duck), 0.0), 1.0),
         ),
         dry_run=_bol(s, "dry_run", cfg.dry_run),
     )

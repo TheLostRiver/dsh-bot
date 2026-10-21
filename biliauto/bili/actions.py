@@ -95,6 +95,7 @@ class Speaker:
         self._queue: asyncio.Queue[tuple[str, Path]] = asyncio.Queue(maxsize=4)
         self._player: asyncio.Task | None = None
         self._ffmpeg = self._find_ffmpeg()
+        self._mixer = None
 
     @staticmethod
     def _find_ffmpeg() -> str | None:
@@ -128,6 +129,18 @@ class Speaker:
         except Exception as e:
             log.warning("TTS 合成失败：%s", e)
             return None
+
+        if self.cfg.mix_enabled:
+            ok, why = self.ensure_mixer()
+            if not ok:
+                log.warning("混音不可用，本条语音跳过：%s", why)
+                return path
+            try:
+                data, sr = self._decode_wav(path)
+                self._mixer.feed(data, sr)
+            except Exception as e:
+                log.warning("混音喂数据失败：%s", e)
+            return path
 
         if self.cfg.backend == "play":
             # 队列满了就丢掉最旧的：直播里宁可少说一句，也别卡成延迟弹幕
@@ -208,7 +221,70 @@ class Speaker:
             log.debug("指定设备播放失败，退回默认设备：%s", e)
             return False
 
+    def ensure_mixer(self) -> tuple[bool, str]:
+        """按需启动混音器（麦克风 + TTS 混成一路）。"""
+        if not self.cfg.mix_enabled:
+            return False, "混音未开启"
+        if self._mixer is not None and self._mixer.running:
+            return True, "ok"
+        from ..audio import AudioMixer
+
+        self._mixer = AudioMixer(
+            input_device=self.cfg.mix_input,
+            output_device=(
+                self.cfg.mix_output
+                if self.cfg.mix_output is not None
+                else self.cfg.device
+            ),
+            mic_gain=self.cfg.mix_mic_gain,
+            tts_gain=self.cfg.mix_tts_gain,
+            duck=self.cfg.mix_duck,
+        )
+        ok, msg = self._mixer.start()
+        if ok:
+            log.info("混音已开启：麦克风 + TTS -> 输出设备")
+        return ok, msg
+
+    def stop_mixer(self) -> None:
+        if self._mixer is not None:
+            self._mixer.stop()
+
+    def mixer_snapshot(self) -> dict:
+        if self._mixer is None:
+            return {"running": False, "enabled": self.cfg.mix_enabled}
+        snap = self._mixer.snapshot()
+        snap["enabled"] = self.cfg.mix_enabled
+        return snap
+
+    def _decode_wav(self, mp3: Path):
+        """mp3 -> (float32 numpy, samplerate)。混音要的是裸样本。"""
+        import numpy as np
+        import wave
+
+        wav = mp3.with_suffix(".wav")
+        if self._ffmpeg:
+            subprocess.run(
+                [self._ffmpeg, "-y", "-loglevel", "error", "-i", str(mp3), str(wav)],
+                check=True,
+                capture_output=True,
+            )
+        try:
+            with wave.open(str(wav), "rb") as w:
+                sr = w.getframerate()
+                ch = w.getnchannels()
+                width = w.getsampwidth()
+                frames = w.readframes(w.getnframes())
+            if width != 2:
+                raise RuntimeError("只支持 16bit wav")
+            data = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            if ch > 1:
+                data = data.reshape(-1, ch).mean(axis=1)
+            return data, sr
+        finally:
+            wav.unlink(missing_ok=True)
+
     async def close(self) -> None:
+        self.stop_mixer()
         if self._player and not self._player.done():
             self._player.cancel()
             try:

@@ -159,6 +159,8 @@ class _Cache:
 _account_cache = _Cache(60)
 _room_cache = _Cache(30)
 _voice_cache = _Cache(3600)
+_mix_probe = None  # 混音自检用的临时 Speaker
+
 # 试听音频很小（十几 KB），内存里留十几条足够，别写盘
 _tts_cache: dict[tuple, bytes] = {}
 
@@ -629,32 +631,99 @@ def create_app() -> FastAPI:
     # ---------------- 音频设备 ----------------
     @app.get("/api/audio/devices")
     async def audio_devices() -> dict:
-        """列出可用的输出设备，方便把语音直接播到虚拟声卡（CABLE Input）。"""
+        """列出输入/输出设备。混音要选一路麦克风 + 一路虚拟声卡。"""
         try:
             import sounddevice as sd
         except Exception as e:
-            return {"items": [], "error": f"未安装 sounddevice：{e}"}
+            return {"items": [], "inputs": [], "error": f"未安装 sounddevice：{e}"}
 
         try:
-            items = []
+            outs, ins = [], []
             for idx, d in enumerate(sd.query_devices()):
-                if d.get("max_output_channels", 0) <= 0:
-                    continue
-                items.append(
-                    {
-                        "index": idx,
-                        "name": str(d.get("name") or ""),
-                        "channels": d["max_output_channels"],
-                    }
-                )
-            default = sd.query_devices(kind="output")
+                if d.get("max_output_channels", 0) > 0:
+                    outs.append(
+                        {
+                            "index": idx,
+                            "name": str(d.get("name") or ""),
+                            "channels": d["max_output_channels"],
+                        }
+                    )
+                if d.get("max_input_channels", 0) > 0:
+                    ins.append(
+                        {
+                            "index": idx,
+                            "name": str(d.get("name") or ""),
+                            "channels": d["max_input_channels"],
+                        }
+                    )
+            try:
+                default_out = str(sd.query_devices(kind="output").get("name") or "")
+            except Exception:
+                default_out = ""
+            try:
+                default_in = str(sd.query_devices(kind="input").get("name") or "")
+            except Exception:
+                default_in = ""
             return {
-                "items": items,
-                "default": str(default.get("name") or ""),
+                "items": outs,
+                "inputs": ins,
+                "default": default_out,
+                "default_input": default_in,
                 "error": "",
             }
         except Exception as e:
-            return {"items": [], "error": str(e)[:160]}
+            return {"items": [], "inputs": [], "error": str(e)[:160]}
+
+    # ---------------- 混音 ----------------
+    @app.get("/api/audio/mix")
+    async def mix_status() -> dict:
+        cfg = AppConfig.load()
+        bot = manager.bot
+        if bot is not None and bot.speaker is not None:
+            return bot.speaker.mixer_snapshot()
+        return {
+            "running": False,
+            "enabled": cfg.speech.mix_enabled,
+            "input": cfg.speech.mix_input,
+            "output": cfg.speech.mix_output or cfg.speech.device,
+            "mic_gain": cfg.speech.mix_mic_gain,
+            "tts_gain": cfg.speech.mix_tts_gain,
+            "duck": cfg.speech.mix_duck,
+        }
+
+    @app.post("/api/audio/mix/test")
+    async def mix_test() -> dict:
+        """用当前设置起一次混音，并送一段测试语音，方便确认路由对不对。"""
+        global _mix_probe
+        cfg = AppConfig.load()
+        if not cfg.speech.mix_enabled:
+            raise HTTPException(status_code=409, detail="先在设置里打开混音")
+        from dataclasses import replace as _replace
+
+        from ..bili.actions import Speaker
+
+        if _mix_probe is None:
+            _mix_probe = Speaker(_replace(cfg.speech, mix_enabled=True))
+        ok, msg = _mix_probe.ensure_mixer()
+        if not ok:
+            raise HTTPException(status_code=409, detail=msg)
+        path = await _mix_probe.say("混音测试，一二三，能听到就说明路由是对的")
+        return {
+            "ok": True,
+            "message": "已送出一段测试语音，检查直播姬里能不能听到",
+            "generated": bool(path),
+            "mixer": _mix_probe.mixer_snapshot(),
+        }
+
+    @app.post("/api/audio/mix/stop")
+    async def mix_stop() -> dict:
+        global _mix_probe
+        if _mix_probe is not None:
+            _mix_probe.stop_mixer()
+        bot = manager.bot
+        if bot is not None and bot.speaker is not None:
+            bot.speaker.stop_mixer()
+        return {"ok": True}
 
     # ---------------- 语音播报开关 ----------------
     @app.post("/api/speech/toggle")

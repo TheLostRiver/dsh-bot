@@ -484,6 +484,63 @@ def test_browse_fixes() -> None:
     store2.close()
 
 
+def test_mixer() -> None:
+    print("\n[混音]")
+    import numpy as np
+
+    from biliauto.audio.mixer import AudioMixer, mix_frames, resample, to_float
+
+    # int16 -> float
+    f = to_float(np.array([0, 16384, -32768], dtype=np.int16))
+    check("int16 归一化", abs(f[1] - 0.5) < 1e-3 and abs(f[2] + 1.0) < 1e-3, str(f))
+
+    # 重采样
+    src = np.sin(np.linspace(0, 6.28, 240)).astype(np.float32)
+    up = resample(src, 24000, 48000)
+    down = resample(src, 48000, 24000)
+    check("24k->48k 长度翻倍", abs(len(up) - 480) <= 1, str(len(up)))
+    check("48k->24k 长度减半", abs(len(down) - 120) <= 1, str(len(down)))
+    check("同采样率原样返回", len(resample(src, 24000, 24000)) == 240)
+
+    # 混音：无 TTS 时等于麦克风乘增益
+    mic = np.full(100, 0.4, dtype=np.float32)
+    out = mix_frames(mic, None, mic_gain=0.5)
+    check("无 TTS 只过麦克风", np.allclose(out, 0.2), str(out[0]))
+
+    # 有 TTS 时叠加，且不越界
+    tts = np.full(100, 0.5, dtype=np.float32)
+    out = mix_frames(mic, tts, mic_gain=1.0, tts_gain=1.0)
+    check("叠加后限幅在 1 以内", out.max() <= 1.0 and out.min() >= -1.0, str(out.max()))
+
+    # 闪避：有 TTS 时麦克风被压低
+    out = mix_frames(mic, tts, mic_gain=1.0, tts_gain=0.0, duck=0.5)
+    check("闪避压低麦克风", abs(out[0] - 0.2) < 1e-6, str(out[0]))
+    out2 = mix_frames(mic, None, mic_gain=1.0, tts_gain=0.0, duck=0.5)
+    check("没有 TTS 时不闪避", abs(out2[0] - 0.4) < 1e-6, str(out2[0]))
+
+    # TTS 比帧短时补零对齐
+    out = mix_frames(mic, np.full(10, 0.1, dtype=np.float32), 1.0, 1.0, 0.0)
+    check("短 TTS 自动补零", len(out) == 100 and abs(out[0] - 0.5) < 1e-6, str(out[0]))
+
+    # 未启动时 feed 是安全的空操作
+    m = AudioMixer(None, None)
+    m.feed(np.zeros(100, dtype=np.float32), 24000)
+    check("未启动时 feed 不报错", m.queued_seconds == 0.0)
+    check("未启动 running=False", m.running is False)
+
+    # 队列取帧：不够一帧就不播半截
+    class StubStream:
+        samplerate = 48000
+
+    m._stream = StubStream()
+    m._tts.append(np.ones(2000, dtype=np.float32))
+    got = m._take(1024)
+    check("取满一帧返回整块", got is not None and len(got) == 1024)
+    got2 = m._take(2048)
+    check("剩余不足一帧时返回 None", got2 is None)
+    m._stream = None
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -510,7 +567,8 @@ def main() -> int:
         pass
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
                test_store, test_patterns, test_comments, test_browse,
-               test_browse_rebuild, test_browse_fixes, test_sender_clamp):
+               test_browse_rebuild, test_browse_fixes, test_mixer,
+               test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0

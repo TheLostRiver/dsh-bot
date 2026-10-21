@@ -80,8 +80,7 @@
     </section>
 
     <!-- ============ 直播互动 ============ -->
-    <section class="page" data-page="live">
-      <div class="card wide">
+    <section class="page" data-page="live">      <div class="card wide">
         <div class="switch-row">
           <div>
             <div class="switch-title">语音播报</div>
@@ -149,6 +148,25 @@
         <div class="voice-actions">
           <button class="btn ghost sm" id="btn-preview" type="button">▶ 试听</button>
           <span class="hint tiny" id="preview-hint">改完音色和音调，先试听再保存</span>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <div class="card-head">
+          <h2>混音（麦克风 + AI 语音）</h2>
+          <div class="head-actions">
+            <span class="hint tiny" id="mix-state">未开启</span>
+            <button class="btn ghost sm" id="btn-mix-test" type="button">测试混音</button>
+          </div>
+        </div>
+        <p class="hint">把真人麦克风和 AI 语音混成一路，输出到虚拟声卡 —— 直播姬只选一个设备就能同时收到两边。</p>
+        <div class="form-grid">
+          <label class="check full"><input id="m-enabled" type="checkbox" /><span>开启混音（保存后重启机器人生效）</span></label>
+          <label>麦克风设备<select id="m-input"><option value="">系统默认</option></select></label>
+          <label>输出设备（选虚拟声卡）<select id="m-output"><option value="">系统默认</option></select></label>
+          <label>麦克风音量<input id="m-mic" type="number" min="0" max="2" step="0.05" /></label>
+          <label>AI 音量<input id="m-tts" type="number" min="0" max="2" step="0.05" /></label>
+          <label class="full">闪避（AI 说话时把麦克风压低多少）<input id="m-duck" type="number" min="0" max="1" step="0.05" /></label>
         </div>
       </div>
     </section>
