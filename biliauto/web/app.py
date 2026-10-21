@@ -360,6 +360,7 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "rate": cfg.speech.rate,
             "pitch": cfg.speech.pitch,
             "max_chars": cfg.speech.max_chars,
+            "device": cfg.speech.device,
         },
         "comments": {
             "enabled": cfg.comments.enabled,
@@ -624,6 +625,36 @@ def create_app() -> FastAPI:
             media_type="audio/mpeg",
             headers={"Cache-Control": "max-age=600"},
         )
+
+    # ---------------- 音频设备 ----------------
+    @app.get("/api/audio/devices")
+    async def audio_devices() -> dict:
+        """列出可用的输出设备，方便把语音直接播到虚拟声卡（CABLE Input）。"""
+        try:
+            import sounddevice as sd
+        except Exception as e:
+            return {"items": [], "error": f"未安装 sounddevice：{e}"}
+
+        try:
+            items = []
+            for idx, d in enumerate(sd.query_devices()):
+                if d.get("max_output_channels", 0) <= 0:
+                    continue
+                items.append(
+                    {
+                        "index": idx,
+                        "name": str(d.get("name") or ""),
+                        "channels": d["max_output_channels"],
+                    }
+                )
+            default = sd.query_devices(kind="output")
+            return {
+                "items": items,
+                "default": str(default.get("name") or ""),
+                "error": "",
+            }
+        except Exception as e:
+            return {"items": [], "error": str(e)[:160]}
 
     # ---------------- 语音播报开关 ----------------
     @app.post("/api/speech/toggle")

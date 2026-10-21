@@ -161,8 +161,6 @@ class Speaker:
                 path.unlink(missing_ok=True)
 
     def _play_blocking(self, mp3: Path) -> None:
-        import winsound  # 仅 Windows
-
         wav = mp3.with_suffix(".wav")
         if self._ffmpeg:
             subprocess.run(
@@ -172,8 +170,43 @@ class Speaker:
             )
         else:
             raise RuntimeError("缺少 ffmpeg，无法转 wav 播放")
-        winsound.PlaySound(str(wav), winsound.SND_FILENAME)
-        wav.unlink(missing_ok=True)
+
+        try:
+            # 指定了输出设备就走 sounddevice：可以精确播到虚拟声卡（CABLE Input），
+            # 不必改系统默认输出。—— 这是把语音送进 OBS / 直播姬的关键
+            if self.cfg.device is not None and self._play_to_device(wav):
+                return
+            import winsound  # 仅 Windows
+
+            winsound.PlaySound(str(wav), winsound.SND_FILENAME)
+        finally:
+            wav.unlink(missing_ok=True)
+
+    def _play_to_device(self, wav: Path) -> bool:
+        try:
+            import wave
+
+            import numpy as np
+            import sounddevice as sd
+
+            with wave.open(str(wav), "rb") as w:
+                sr = w.getframerate()
+                ch = w.getnchannels()
+                width = w.getsampwidth()
+                frames = w.readframes(w.getnframes())
+            if width != 2:
+                log.debug("只支持 16bit wav，退回默认设备")
+                return False
+
+            data = np.frombuffer(frames, dtype=np.int16)
+            if ch > 1:
+                data = data.reshape(-1, ch)
+            sd.play(data, sr, device=self.cfg.device)
+            sd.wait()
+            return True
+        except Exception as e:
+            log.debug("指定设备播放失败，退回默认设备：%s", e)
+            return False
 
     async def close(self) -> None:
         if self._player and not self._player.done():

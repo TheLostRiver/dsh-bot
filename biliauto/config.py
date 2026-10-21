@@ -550,6 +550,11 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
             rate=_txt(speech, "rate", cfg.speech.rate),
             pitch=_txt(speech, "pitch", cfg.speech.pitch),
             max_chars=_num(speech, "max_chars", cfg.speech.max_chars, int),
+            device=(
+                int(speech["device"])
+                if str(speech.get("device", "")).strip().lstrip("-").isdigit()
+                else None
+            ),
         ),
         dry_run=_bol(s, "dry_run", cfg.dry_run),
     )

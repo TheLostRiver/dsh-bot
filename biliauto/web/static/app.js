@@ -197,6 +197,12 @@ async function loadSettings() {
     $("v-rate").value = s.speech.rate || "";
     $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
+    if ($("v-device")) {
+      $("v-device").value =
+        s.speech.device === null || s.speech.device === undefined
+          ? ""
+          : String(s.speech.device);
+    }
 
     if (s.comments) {      $("c-enabled").checked = !!s.comments.enabled;
       $("c-upmid").value = s.comments.up_mid;
@@ -277,6 +283,7 @@ function collectSettings() {
       rate: $("v-rate").value.trim() || "+8%",
       pitch: $("v-pitch").value.trim() || "+0Hz",
       max_chars: Math.trunc(num("v-max", 80)),
+      device: $("v-device") && $("v-device").value ? Number($("v-device").value) : null,
     },
     comments: {
       enabled: $("c-enabled").checked,
@@ -469,6 +476,25 @@ async function previewVoice() {
     hint.textContent = "试听失败：" + e.message;
     btn.disabled = false;
   }
+}
+
+/* ---------------------------------------------------------------- 音频设备 */
+async function loadAudioDevices() {
+  const sel = $("v-device");
+  if (!sel) return;
+  try {
+    const r = await api("/api/audio/devices");
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">系统默认</option>';
+    for (const d of r.items || []) {
+      const o = document.createElement("option");
+      o.value = String(d.index);
+      o.textContent = `[${d.index}] ${d.name}`;
+      sel.appendChild(o);
+    }
+    if (keep) sel.value = keep;
+    if (r.error) $("preview-hint").textContent = "音频设备不可用：" + r.error;
+  } catch { /* 忽略 */ }
 }
 
 /* ---------------------------------------------------------------- 人设预览 */
@@ -1294,6 +1320,7 @@ function bind() {
   bind();
   await loadSettings();
   await loadVoices();
+  await loadAudioDevices();
   await refreshStatus();
   applyRoute();
   refreshLogs();
