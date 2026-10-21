@@ -218,6 +218,15 @@ python scripts/run_web.py
 
 看到 `跳过（low_play 4）` 就是门槛设高了，`跳过（too_short 4）` 就是来源太碎。
 
+### 另一个容易踩的坑：SDK 的返回值
+
+`bilibili_api` 的操作类接口（点赞/投币/收藏/评论）**自己会检查 `code` 并抛异常**，
+成功时返回的是响应里的 `data` 字段（比如 `{"like": 8}`），**根本不含 `code`**。
+
+所以判断成功与否不能写 `resp["code"] == 0` —— 那样每次成功都会被判成失败，
+连带后果是**配额永不消耗**（等于没有限流）。正确写法是「没抛异常就算成功」，
+返回里恰好有 `code` 才再核对。代码里 `browse/actions.py::_ok()` 就是干这个的。
+
 ### 动作矩阵：每样单独开关
 
 | 动作 | 默认 | 风险 | 说明 |
@@ -437,7 +446,7 @@ scripts/
   check_env.py       环境自检
   replay.py          离线回放（不连 B 站）
 tests/
-  test_core.py       69 项断言，python tests/test_core.py
+  test_core.py       90 项断言，python tests/test_core.py
 ```
 
 **改动建议**：想改性格就只动 `llm.py` 里的 `build_system_prompt`（或直接用后台的人设表单）；

@@ -492,8 +492,11 @@ class Store:
             seen = self._conn.execute(
                 "SELECT COUNT(*) AS c FROM browse_seen"
             ).fetchone()
+            # dry_run 的假动作不算"真的做过"
             acted = self._conn.execute(
-                "SELECT COUNT(*) AS c, SUM(ok) AS ok FROM browse_actions"
+                "SELECT COUNT(*) AS c,"
+                " SUM(CASE WHEN ok=1 AND IFNULL(error,'')!='dry_run' THEN 1 ELSE 0 END) AS ok"
+                " FROM browse_actions"
             ).fetchone()
         return {
             "seen": seen["c"] or 0,

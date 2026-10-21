@@ -355,11 +355,12 @@ class CommentDuty:
             log.warning("回复评论异常：%s", e)
             return False, f"exception:{str(e)[:80]}"
 
+        # send_comment 成功时返回的是 data 字段（含 rpid 等），不含 code——没抛异常即成功
         code = resp.get("code") if isinstance(resp, dict) else None
-        if code == 0:
+        if code is None or (isinstance(code, int) and code == 0):
             log.info("已回复评论（%s）：%s", c.uname, text)
             return True, "ok"
         if code in (-412, 412, -352, 352):
             self.budget.note_blocked(900)
-        log.warning("回复评论被拒 code=%s msg=%s", code, resp.get("message"))
+        log.warning("回复评论被拒 code=%s", code)
         return False, f"code:{code}"

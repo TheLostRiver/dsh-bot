@@ -78,6 +78,7 @@ class BrowseRunner:
         )
 
         self._stop = asyncio.Event()
+        self._round_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self.rounds = 0
         self.last_round: dict = {}
@@ -137,6 +138,18 @@ class BrowseRunner:
 
     # ---------- 一轮 ----------
     async def round_once(self) -> RoundResult:
+        """带互斥的入口：长驻循环和手动一轮不能同时跑。
+
+        否则两边都会读到「这条没看过」，各判一次、各发一次动作。
+        """
+        if self._round_lock.locked():
+            r = RoundResult()
+            r.error = "上一轮还没跑完，稍等"
+            return r
+        async with self._round_lock:
+            return await self._do_round()
+
+    async def _do_round(self) -> RoundResult:
         r = RoundResult()
         # 四种来源都是可选的：都不填就走热门，不拦启动
         try:

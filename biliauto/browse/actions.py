@@ -79,11 +79,12 @@ class InteractionPerformer:
             resp = await v.like(True)
         except Exception as e:
             return ActionResult("like", False, f"exception:{str(e)[:60]}")
-        if _code(resp) == 0:
+        ok2, detail = _ok(resp)
+        if ok2:
             self.store.incr_action("like")
             log.info("已点赞 %s %s", cand.bvid, cand.title[:20])
             return ActionResult("like", True, "ok")
-        return ActionResult("like", False, f"code:{_code(resp)}")
+        return ActionResult("like", False, detail)
 
     async def favorite(self, cand: Candidate) -> ActionResult:
         ok, why = self.gate("favorite", self.cfg.favorite)
@@ -107,11 +108,12 @@ class InteractionPerformer:
             resp = await v.set_favorite(add_media_ids=[folder])
         except Exception as e:
             return ActionResult("favorite", False, f"exception:{str(e)[:60]}")
-        if _code(resp) == 0:
+        ok2, detail = _ok(resp)
+        if ok2:
             self.store.incr_action("favorite")
             log.info("已收藏 %s", cand.bvid)
             return ActionResult("favorite", True, "ok")
-        return ActionResult("favorite", False, f"code:{_code(resp)}")
+        return ActionResult("favorite", False, detail)
 
     async def coin(self, cand: Candidate) -> ActionResult:
         """投币会真花掉账号硬币，所以默认关。"""
@@ -126,11 +128,12 @@ class InteractionPerformer:
             resp = await v.pay_coin(num=1, like=False)
         except Exception as e:
             return ActionResult("coin", False, f"exception:{str(e)[:60]}")
-        if _code(resp) == 0:
+        ok2, detail = _ok(resp)
+        if ok2:
             self.store.incr_action("coin")
             log.info("已投币 %s", cand.bvid)
             return ActionResult("coin", True, "ok")
-        return ActionResult("coin", False, f"code:{_code(resp)}")
+        return ActionResult("coin", False, detail)
 
     async def follow(self, cand: Candidate) -> ActionResult:
         ok, why = self.gate("follow", self.cfg.follow)
@@ -146,11 +149,12 @@ class InteractionPerformer:
             resp = await u.modify_relation(user.RelationType.SUBSCRIBE)
         except Exception as e:
             return ActionResult("follow", False, f"exception:{str(e)[:60]}")
-        if _code(resp) == 0:
+        ok2, detail = _ok(resp)
+        if ok2:
             self.store.incr_action("follow")
             log.info("已关注 %s", cand.up_name)
             return ActionResult("follow", True, "ok")
-        return ActionResult("follow", False, f"code:{_code(resp)}")
+        return ActionResult("follow", False, detail)
 
     async def comment(self, cand: Candidate, text: str) -> ActionResult:
         ok, why = self.gate("comment", self.cfg.comment)
@@ -171,11 +175,12 @@ class InteractionPerformer:
             )
         except Exception as e:
             return ActionResult("comment", False, f"exception:{str(e)[:60]}")
-        if _code(resp) == 0:
+        ok2, detail = _ok(resp)
+        if ok2:
             self.store.incr_action("comment")
             log.info("已评论 %s：%s", cand.bvid, text)
             return ActionResult("comment", True, "ok")
-        return ActionResult("comment", False, f"code:{_code(resp)}")
+        return ActionResult("comment", False, detail)
 
     # ---------- 收藏夹 ----------
     async def _ensure_folder(self) -> int | None:
@@ -213,10 +218,19 @@ class InteractionPerformer:
         return None
 
 
-def _code(resp) -> int:
+def _ok(resp) -> tuple[bool, str]:
+    """判断一次操作是否成功。
+
+    bilibili_api 的 operate 类接口**自己会检查 code 并抛异常**，
+    返回值是响应里的 `data` 字段（比如 {"like": 8}），根本不含 code。
+    所以：没抛异常就是成功；若返回里恰好有 code 才再核对一次。
+    """
     if isinstance(resp, dict):
-        try:
-            return int(resp.get("code", -1))
-        except (TypeError, ValueError):
-            return -1
-    return -1
+        code = resp.get("code")
+        if code is not None:
+            try:
+                if int(code) != 0:
+                    return False, f"code:{code}"
+            except (TypeError, ValueError):
+                pass
+    return True, "ok"

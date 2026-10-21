@@ -173,7 +173,10 @@ class Source:
             bvid = it.get("bvid")
             if not bvid:
                 continue
-            stat = it.get("stat") or {}
+            # 注意：这个接口的播放量在顶层 play 字段，没有 stat 字典
+            play = it.get("play")
+            if play is None:
+                play = (it.get("stat") or {}).get("view")
             out.append(
                 Candidate(
                     bvid=str(bvid),
@@ -182,7 +185,7 @@ class Source:
                     up_mid=mid,
                     up_name=str(it.get("author") or ""),
                     duration=_duration_seconds(it.get("length") or it.get("duration")),
-                    play=int(stat.get("view") or 0),
+                    play=int(play or 0),
                     pubdate=float(it.get("created") or it.get("pubdate") or 0),
                     desc=str(it.get("description") or ""),
                     source=f"up:{mid}",

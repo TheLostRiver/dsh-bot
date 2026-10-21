@@ -390,6 +390,100 @@ def test_browse_rebuild() -> None:
     check("旧 runner 被替换", mgr.runner is not old)
 
 
+def test_browse_fixes() -> None:
+    """自动逛 B 站四个已修复 bug 的回归。"""
+    print("\n[逛站修复回归]")
+    import asyncio as _asyncio
+
+    from dataclasses import replace
+
+    from biliauto.browse.actions import ActionResult, InteractionPerformer, _ok
+    from biliauto.browse.runner import BrowseRunner
+    from biliauto.browse.source import Candidate
+    from biliauto.config import ActionSpec, AppConfig
+
+    cfg = AppConfig.load()
+
+    # ① 返回值判断：SDK 成功时返回 data（不含 code），不能因此判失败
+    check("空 dict 视为成功", _ok({})[0] is True)
+    check("code=0 视为成功", _ok({"code": 0})[0] is True)
+    check("code!=0 视为失败", _ok({"code": -101})[0] is False)
+    check("None 视为成功", _ok(None)[0] is True)
+
+    # ② 成功要消耗配额，失败不能消耗
+    bc = replace(cfg.browse, like=ActionSpec(True, 20, 1.0))
+    store = Store(Path(tempfile.mkdtemp()) / "fx.db")
+    perf = InteractionPerformer(bc, store, None, dry_run=False)
+    cand = Candidate("BVFX", 1, "t", 2, "UP", 300, 5000, time.time(), source="search:x")
+
+    class OkVideo:
+        async def has_liked(self):
+            return False
+
+        async def like(self, status=True):
+            return {"like": 8}  # 真实返回形状
+
+    class BoomVideo:
+        async def has_liked(self):
+            return False
+
+        async def like(self, status=True):
+            raise RuntimeError("boom")
+
+    perf._video = lambda c: OkVideo()
+    r = _asyncio.run(perf.like(cand))
+    check("点赞成功被正确识别", r.ok and r.detail == "ok", f"{r.ok} {r.detail}")
+    check("成功后消耗配额", store.action_used("like") == 1)
+
+    perf._video = lambda c: BoomVideo()
+    r = _asyncio.run(perf.like(cand))
+    check("异常不算成功", not r.ok)
+    check("失败不消耗配额", store.action_used("like") == 1)
+
+    # ③ dry_run 的假动作不能计入「动作总数」
+    store.log_action("BVFX", "like", True, "dry_run")
+    check("dry_run 不计入成功数", store.browse_stats()["actions_ok"] == 0,
+          str(store.browse_stats()))
+    store.close()
+
+    # ④ 并发两轮必须互斥，同一视频只能被处理一次
+    store2 = Store(Path(tempfile.mkdtemp()) / "race.db")
+    cfg2 = replace(
+        cfg, dry_run=True,
+        browse=replace(cfg.browse, keywords=("x",), max_llm=5, batch=5),
+    )
+    runner = BrowseRunner(cfg2, store2, credential=None)
+    one = Candidate("BVRACE", 1, "竞态", 2, "UP", 300, 5000, time.time(), source="search:x")
+    calls: list[str] = []
+
+    async def fake_discover(_bc, _limit):
+        return [one]
+
+    async def fake_content(_c):
+        return "字幕"
+
+    async def fake_decide(_c, _t):
+        return {"worth": True, "reason": "t", "like": True}
+
+    async def fake_act(c, _plan):
+        calls.append(c.bvid)
+        await _asyncio.sleep(0.2)
+        return [ActionResult("like", True, "dry_run")]
+
+    runner.source.discover = fake_discover
+    runner._content = fake_content
+    runner._decide = fake_decide
+    runner._act = fake_act
+
+    async def run_two():
+        return await _asyncio.gather(runner.round_once(), runner.round_once())
+
+    a, b = _asyncio.run(run_two())
+    check("并发只处理一次", len(calls) == 1, str(calls))
+    check("第二轮被拒绝", "还没跑完" in b.error or "还没跑完" in a.error, f"{a.error}|{b.error}")
+    store2.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -416,7 +510,7 @@ def main() -> int:
         pass
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
                test_store, test_patterns, test_comments, test_browse,
-               test_browse_rebuild, test_sender_clamp):
+               test_browse_rebuild, test_browse_fixes, test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0
