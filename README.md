@@ -183,6 +183,31 @@ BILI_BUVID3=<一串带 infoc 后缀的标识>
 
 > 注意：`play` 模式会把系统**所有**声音都送进直播（包括微信提示音）。介意的话用 [VB-Cable A+ B](https://vb-audio.com/Cable/) 建第二条线，或装 `sounddevice` 指定输出设备。
 
+### 换音色
+
+后台「语音播报 → 音色」是一个**可搜索下拉框**，点「▶ 试听」会当场合成一句念给你听，改完再保存。
+
+- 中文音色 **14 个**（zh-CN 6 + 方言 2 + 港台 6），总音色 322 个
+- 下拉里选，也可以直接粘任意 voice ID（比如英文的 `en-US-AriaNeural`）
+- 音调 `TTS_PITCH` 能再拧一道：`+50Hz` 更活泼，`-50Hz` 更低沉
+
+几个常用的：
+
+| voice ID | 性别 | 听感 |
+|---|---|---|
+| `zh-CN-XiaoxiaoNeural` | 女 | 自然、亲和，默认值 |
+| `zh-CN-XiaoyiNeural` | 女 | 更年轻、偏软 |
+| `zh-CN-YunxiNeural` | 男 | 少年感，适合傲娇/嘴贫 |
+| `zh-CN-YunjianNeural` | 男 | 沉稳播音腔 |
+| `zh-CN-liaoning-XiaobeiNeural` | 女 | 东北话，整活效果强 |
+| `zh-CN-shaanxi-XiaoniNeural` | 女 | 陕西话 |
+
+> ⚠️ **edge-tts 必须 ≥ 7.3.1**。老版本会被微软挡成 `403 WebSocket handshake`，
+> 表现为「试听失败 / 语音播报失败」。升级：`pip install -U "edge-tts>=7.3.1"`。
+
+> edge-tts 是「语音合成」，不是「声音克隆」。想要**你自己的声音**得换引擎
+> （GPT-SoVITS / CosyVoice / Fish Audio 这类），那要单独跑一个推理服务，改动不小。
+
 ---
 
 ## 六、调参：安全第一

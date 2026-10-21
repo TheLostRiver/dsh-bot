@@ -118,7 +118,11 @@ class Speaker:
             import edge_tts
 
             communicate = edge_tts.Communicate(
-                text, self.cfg.voice, rate=self.cfg.rate, volume=self.cfg.volume
+                text,
+                self.cfg.voice,
+                rate=self.cfg.rate,
+                volume=self.cfg.volume,
+                pitch=self.cfg.pitch,
             )
             await communicate.save(str(path))
         except Exception as e:

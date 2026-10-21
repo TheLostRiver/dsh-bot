@@ -119,7 +119,10 @@
 
     <!-- 语音 -->
     <div class="card">
-      <div class="card-head"><h2>语音播报</h2></div>
+      <div class="card-head">
+        <h2>语音播报</h2>
+        <span class="hint tiny" id="voice-count"></span>
+      </div>
       <div class="form-grid">
         <label class="check full"><input id="v-enabled" type="checkbox" /><span>开启 TTS</span></label>
         <label>输出方式
@@ -128,9 +131,17 @@
             <option value="play">play · 本机播放（配 VB-Cable）</option>
           </select>
         </label>
-        <label>音色<input id="v-voice" type="text" /></label>
         <label>语速<input id="v-rate" type="text" placeholder="+8%" /></label>
+        <label class="full">音色（从列表挑，也可直接填 ID）
+          <input id="v-voice" list="voice-options" placeholder="zh-CN-XiaoxiaoNeural" />
+          <datalist id="voice-options"></datalist>
+        </label>
+        <label>音调<input id="v-pitch" type="text" placeholder="+0Hz" /></label>
         <label>最长字数<input id="v-max" type="number" min="10" /></label>
+      </div>
+      <div class="voice-actions">
+        <button class="btn ghost sm" id="btn-preview" type="button">▶ 试听</button>
+        <span class="hint tiny" id="preview-hint">改完音色和音调，先试听再保存</span>
       </div>
     </div>
 

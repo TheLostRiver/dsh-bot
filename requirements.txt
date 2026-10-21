@@ -2,7 +2,8 @@
 bilibili-api-python>=17.4.2
 openai>=1.40.0
 python-dotenv>=1.0.1
-edge-tts>=6.1.0
+# 注意：edge-tts < 7.3.1 会被微软挡成 403（WebSocket 握手失败），必须用新版
+edge-tts>=7.3.1
 imageio-ffmpeg>=0.5.1
 httpx>=0.27.0
 

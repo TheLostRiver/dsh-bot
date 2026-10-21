@@ -138,6 +138,7 @@ class SpeechConfig:
     voice: str
     rate: str
     volume: str
+    pitch: str
     device: int | None
     max_chars: int
     out_dir: Path
@@ -211,6 +212,7 @@ class AppConfig:
                 voice=_str("TTS_VOICE", "zh-CN-XiaoxiaoNeural"),
                 rate=_str("TTS_RATE", "+8%"),
                 volume=_str("TTS_VOLUME", "+0%"),
+                pitch=_str("TTS_PITCH", "+0Hz"),
                 device=device,
                 max_chars=_int("SPEECH_MAX_CHARS", 80),
                 out_dir=data_dir / "speech",
@@ -363,6 +365,7 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
             backend=_txt(speech, "backend", cfg.speech.backend),
             voice=_txt(speech, "voice", cfg.speech.voice),
             rate=_txt(speech, "rate", cfg.speech.rate),
+            pitch=_txt(speech, "pitch", cfg.speech.pitch),
             max_chars=_num(speech, "max_chars", cfg.speech.max_chars, int),
         ),
         dry_run=_bol(s, "dry_run", cfg.dry_run),

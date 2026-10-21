@@ -182,6 +182,7 @@ async function loadSettings() {
     $("v-backend").value = s.speech.backend;
     $("v-voice").value = s.speech.voice || "";
     $("v-rate").value = s.speech.rate || "";
+    $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
 
     settingsLoaded = true;
@@ -224,6 +225,7 @@ function collectSettings() {
       backend: $("v-backend").value,
       voice: $("v-voice").value.trim(),
       rate: $("v-rate").value.trim() || "+8%",
+      pitch: $("v-pitch").value.trim() || "+0Hz",
       max_chars: Math.trunc(num("v-max", 80)),
     },
   };
@@ -299,6 +301,52 @@ async function refreshReplies() {
   } catch { /* 同上 */ }
 }
 
+/* ---------------------------------------------------------------- 语音 */
+async function loadVoices() {
+  try {
+    const r = await api("/api/voices");
+    const dl = $("voice-options");
+    dl.innerHTML = "";
+    for (const v of r.items || []) {
+      const o = document.createElement("option");
+      o.value = v.id;
+      o.label = `${v.name} · ${v.gender} · ${v.locale}`;
+      dl.appendChild(o);
+    }
+    const zh = (r.items || []).filter((v) => v.zh).length;
+    $("voice-count").textContent = `共 ${r.total} 个音色 · 中文 ${zh}`;
+  } catch { /* 音色列表拿不到不影响主流程 */ }
+}
+
+async function previewVoice() {
+  const voice = $("v-voice").value.trim();
+  const hint = $("preview-hint");
+  const btn = $("btn-preview");
+  if (!voice) { toast("先选一个音色"); return; }
+
+  btn.disabled = true;
+  hint.textContent = "合成中…";
+  try {
+    const url =
+      `/api/tts/preview?voice=${encodeURIComponent(voice)}` +
+      `&rate=${encodeURIComponent($("v-rate").value.trim() || "+8%")}` +
+      `&pitch=${encodeURIComponent($("v-pitch").value.trim() || "+0Hz")}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).detail; } catch { /* 非 JSON */ }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    const audio = new Audio(URL.createObjectURL(await res.blob()));
+    audio.onended = () => { hint.textContent = "试听结束"; btn.disabled = false; };
+    await audio.play();
+    hint.textContent = `正在播放：${voice}`;
+  } catch (e) {
+    hint.textContent = "试听失败：" + e.message;
+    btn.disabled = false;
+  }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -341,6 +389,7 @@ function bind() {
 
   $("btn-toggle").addEventListener("click", toggleBot);
   $("btn-save").addEventListener("click", saveSettings);
+  $("btn-preview").addEventListener("click", previewVoice);
   $("btn-clear-log").addEventListener("click", () => { $("logbox").innerHTML = ""; });
 
   $("t-prob").addEventListener("input", (e) => {
@@ -359,6 +408,7 @@ function bind() {
 (async function init() {
   bind();
   await loadSettings();
+  await loadVoices();
   await refreshStatus();
   refreshLogs();
   refreshReplies();

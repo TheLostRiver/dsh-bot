@@ -13,7 +13,7 @@ from collections import deque
 from dataclasses import replace
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -158,6 +158,9 @@ class _Cache:
 
 _account_cache = _Cache(60)
 _room_cache = _Cache(30)
+_voice_cache = _Cache(3600)
+# 试听音频很小（十几 KB），内存里留十几条足够，别写盘
+_tts_cache: dict[tuple, bytes] = {}
 
 
 async def account_info(cfg: AppConfig, force: bool = False) -> dict:
@@ -248,6 +251,7 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "backend": cfg.speech.backend,
             "voice": cfg.speech.voice,
             "rate": cfg.speech.rate,
+            "pitch": cfg.speech.pitch,
             "max_chars": cfg.speech.max_chars,
         },
     }
@@ -353,6 +357,69 @@ def create_app() -> FastAPI:
     async def bot_dry_run(payload: dict) -> dict:
         """改 dry_run 需要重启才生效，这里只做提示。"""
         return {"ok": True, "restart_required": manager.running}
+
+    # ---------------- 语音 ----------------
+    @app.get("/api/voices")
+    async def voices() -> dict:
+        if _voice_cache.fresh():
+            return _voice_cache.data
+        try:
+            import edge_tts
+
+            raw = await edge_tts.list_voices()
+        except Exception as e:
+            return {"items": [], "total": 0, "error": f"获取音色列表失败：{e}"}
+
+        items = [
+            {
+                "id": v.get("ShortName", ""),
+                "name": (v.get("FriendlyName") or "").split(" - ")[0],
+                "gender": "女" if v.get("Gender") == "Female" else "男",
+                "locale": v.get("Locale", ""),
+                "zh": str(v.get("Locale", "")).startswith("zh"),
+            }
+            for v in raw
+        ]
+        # 中文排前面，其余按地区排；下拉框才好用
+        items.sort(key=lambda x: (not x["zh"], x["locale"], x["id"]))
+        data = {"items": items, "total": len(items)}
+        _voice_cache.set(data)
+        return data
+
+    @app.get("/api/tts/preview")
+    async def tts_preview(
+        voice: str,
+        text: str = "你好呀，我是直播间里那只 AI。",
+        rate: str = "+0%",
+        pitch: str = "+0Hz",
+    ) -> Response:
+        text = (text or "").strip()[:60]
+        if not text:
+            raise HTTPException(status_code=400, detail="试听文本不能为空")
+
+        key = (voice, text, rate, pitch)
+        if key not in _tts_cache:
+            try:
+                import edge_tts
+
+                comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+                buf = bytearray()
+                async for chunk in comm.stream():
+                    if chunk.get("type") == "audio":
+                        buf.extend(chunk["data"])
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"合成失败：{e}")
+            if not buf:
+                raise HTTPException(status_code=502, detail="合成结果为空，音色名可能不对")
+            if len(_tts_cache) > 16:
+                _tts_cache.clear()
+            _tts_cache[key] = bytes(buf)
+
+        return Response(
+            content=_tts_cache[key],
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "max-age=600"},
+        )
 
     # ---------------- 观测 ----------------
     @app.get("/api/logs")
