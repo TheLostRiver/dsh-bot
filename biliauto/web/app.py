@@ -713,6 +713,31 @@ def create_app() -> FastAPI:
         items = await Source(build_credential(cfg.bili)).resolve_up(name)
         return {"items": items}
 
+    @app.get("/api/browse/history")
+    async def browse_history(
+        verdict: str = "",
+        action: str = "",
+        q: str = "",
+        limit: int = 40,
+        offset: int = 0,
+    ) -> dict:
+        cfg = AppConfig.load()
+        store = Store(cfg.data_dir / "biliauto.db")
+        try:
+            data = store.browse_history(
+                verdict=verdict,
+                action=action,
+                query=(q or "").strip(),
+                limit=max(1, min(limit, 200)),
+                offset=max(0, offset),
+            )
+            data["stats"] = store.browse_stats()
+            data["today"] = store.actions_today()
+            data["dry_run"] = cfg.dry_run
+            return data
+        finally:
+            store.close()
+
     @app.get("/api/browse/actions")
     async def browse_actions(limit: int = 30) -> dict:
         cfg = AppConfig.load()

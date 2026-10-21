@@ -504,6 +504,96 @@ class Store:
             "actions_ok": acted["ok"] or 0,
         }
 
+    def browse_history(
+        self,
+        verdict: str = "",
+        action: str = "",
+        query: str = "",
+        limit: int = 40,
+        offset: int = 0,
+    ) -> dict:
+        """逛站记录分页查询。
+
+        verdict: "" 看过并判断 | "acted" 互动过 | "judged" 看过没动 | "skip" 跳过
+        action : 只保留某个动作成功的条目（like/favorite/coin/follow/comment）
+        """
+        where = ["1=1"]
+        params: list = []
+
+        if verdict == "acted":
+            where.append(
+                "EXISTS (SELECT 1 FROM browse_actions a WHERE a.bvid=b.bvid AND a.ok=1)"
+            )
+        elif verdict == "judged":
+            where.append("b.verdict='judged'")
+        elif verdict == "skip":
+            where.append("b.verdict='skip'")
+        else:
+            where.append("b.verdict!='skip'")
+
+        if action:
+            where.append(
+                "EXISTS (SELECT 1 FROM browse_actions a WHERE a.bvid=b.bvid"
+                " AND a.action=? AND a.ok=1)"
+            )
+            params.append(action)
+
+        if query:
+            where.append("(b.title LIKE ? OR b.bvid = ? OR b.up_name LIKE ?)")
+            like = f"%{query}%"
+            params.extend([like, query, like])
+
+        cond = " AND ".join(where)
+        with self._lock:
+            total = self._conn.execute(
+                f"SELECT COUNT(*) AS c FROM browse_seen b WHERE {cond}", params
+            ).fetchone()["c"]
+            rows = self._conn.execute(
+                "SELECT b.bvid, b.title, b.up_name, b.source, b.play, b.duration,"
+                "       b.verdict, b.reason, b.seen_at, b.aid"
+                f" FROM browse_seen b WHERE {cond}"
+                " ORDER BY b.seen_at DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
+
+            bvids = [r["bvid"] for r in rows]
+            acts: dict[str, list[dict]] = {}
+            if bvids:
+                marks = ",".join("?" * len(bvids))
+                for a in self._conn.execute(
+                    "SELECT bvid, action, ok, error, ts FROM browse_actions"
+                    f" WHERE bvid IN ({marks}) ORDER BY id DESC",
+                    bvids,
+                ):
+                    acts.setdefault(a["bvid"], []).append(
+                        {
+                            "action": a["action"],
+                            "ok": bool(a["ok"]),
+                            "error": a["error"] or "",
+                            "ts": a["ts"],
+                        }
+                    )
+
+        return {
+            "total": total or 0,
+            "items": [
+                {
+                    "bvid": r["bvid"],
+                    "aid": r["aid"] or 0,
+                    "title": r["title"] or "",
+                    "up_name": r["up_name"] or "",
+                    "source": r["source"] or "",
+                    "play": r["play"] or 0,
+                    "duration": r["duration"] or 0,
+                    "verdict": r["verdict"] or "",
+                    "reason": r["reason"] or "",
+                    "seen_at": r["seen_at"] or 0,
+                    "actions": acts.get(r["bvid"], []),
+                }
+                for r in rows
+            ],
+        }
+
     def browse_report(self, limit: int = 40) -> list[dict]:
         """今天真正"看过并判断过"的视频，连同它在上面做过的动作。
 

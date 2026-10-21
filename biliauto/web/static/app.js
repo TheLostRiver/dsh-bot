@@ -636,6 +636,7 @@ const ROUTES = {
   live: "直播互动",
   comments: "评论区",
   browse: "自动逛 B 站",
+  history: "逛站记录",
   persona: "人设",
   settings: "设置",
   logs: "日志",
@@ -655,14 +656,18 @@ function applyRoute() {
     p.classList.toggle("active", p.dataset.page === r)
   );
   $("page-title").textContent = ROUTES[r];
-  // 概览和日志没有可编辑项，藏掉保存栏
-  $("savebar").classList.toggle("hidden", r === "logs" || r === "overview");
+  // 概览 / 日志 / 记录页没有可编辑项，藏掉保存栏
+  $("savebar").classList.toggle(
+    "hidden",
+    r === "logs" || r === "overview" || r === "history"
+  );
 
   if (r === "browse") {
     refreshBrowse();
     refreshBrowseActions();
     refreshBrowseReport();
   }
+  if (r === "history") loadHistory(true);
   if (r === "logs") refreshLogs();
 }
 
@@ -730,11 +735,16 @@ function sourceLabel(src) {
   return src;
 }
 
-function actionBadge(action, ok) {
+function actionBadge(action, ok, dryRun) {
   const meta = ACTION_META[action] || { label: action, icon: "·" };
   const el = document.createElement("span");
-  el.className = "badge " + (ACTION_META[action] ? action : "") + (ok ? "" : " bad");
+  el.className =
+    "badge " + (ACTION_META[action] ? action : "") + (ok ? "" : " bad") +
+    (dryRun ? " dry" : "");
   el.textContent = `${meta.icon} ${meta.label}${ok ? "" : "✕"}`;
+  if (dryRun) {
+    el.title = "演练模式：只做了决策，没有真的发出去";
+  }
   return el;
 }
 
@@ -1018,60 +1028,123 @@ async function refreshBrowseReport() {
       return;
     }
 
-    for (const it of items) {
-      const entry = document.createElement("div");
-      const okActions = (it.actions || []).filter((x) => x.ok);
-      entry.className = "rp-entry" + (okActions.length ? " has-action" : "");
-
-      const head = document.createElement("div");
-      head.className = "rp-head";
-
-      const link = document.createElement("a");
-      link.className = "rp-title";
-      link.href = `https://www.bilibili.com/video/${it.bvid}`;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.textContent = it.title || it.bvid;
-
-      const badges = document.createElement("div");
-      badges.className = "rp-badges";
-      if ((it.actions || []).length) {
-        for (const act of it.actions) badges.appendChild(actionBadge(act.action, act.ok));
-      } else {
-        const b = document.createElement("span");
-        b.className = "badge";
-        b.style.color = "#8b93a4";
-        b.textContent = "看过，未互动";
-        badges.appendChild(b);
-      }
-      head.append(link, badges);
-
-      const meta = document.createElement("div");
-      meta.className = "rp-meta";
-      const bits = [
-        sourceLabel(it.source),
-        `${fmtPlay(it.play)} 播放`,
-        fmtDur(it.duration),
-      ];
-      if (it.up_name) bits.push(it.up_name);
-      bits.push(timeAgo(it.seen_at));
-      for (const b of bits) {
-        const s = document.createElement("span");
-        if (b === sourceLabel(it.source)) s.className = "src";
-        s.textContent = b;
-        meta.appendChild(s);
-      }
-
-      entry.append(head, meta);
-      if (it.reason) {
-        const reason = document.createElement("div");
-        reason.className = "rp-reason";
-        reason.textContent = it.reason;
-        entry.appendChild(reason);
-      }
-      box.appendChild(entry);
-    }
+    for (const it of items) box.appendChild(buildReportEntry(it));
   } catch { /* 忽略 */ }
+}
+
+function buildReportEntry(it, opts = {}) {
+  const entry = document.createElement("div");
+  const okActions = (it.actions || []).filter((x) => x.ok);
+  entry.className = "rp-entry" + (okActions.length ? " has-action" : "");
+
+  const head = document.createElement("div");
+  head.className = "rp-head";
+
+  const link = document.createElement("a");
+  link.className = "rp-title";
+  link.href = `https://www.bilibili.com/video/${it.bvid}`;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = it.title || it.bvid;
+
+  const badges = document.createElement("div");
+  badges.className = "rp-badges";
+  if ((it.actions || []).length) {
+    for (const act of it.actions) {
+      badges.appendChild(actionBadge(act.action, act.ok, act.error === "dry_run"));
+    }
+  } else if (opts.showVerdict && it.verdict === "skip") {
+    const tag = document.createElement("span");
+    tag.className = "verdict-tag skip";
+    tag.textContent = "跳过";
+    badges.appendChild(tag);
+  } else {
+    const b = document.createElement("span");
+    b.className = "badge";
+    b.style.color = "#8b93a4";
+    b.textContent = "看过，未互动";
+    badges.appendChild(b);
+  }
+  head.append(link, badges);
+
+  const meta = document.createElement("div");
+  meta.className = "rp-meta";
+  const src = sourceLabel(it.source);
+  const bits = [src, `${fmtPlay(it.play)} 播放`, fmtDur(it.duration)];
+  if (it.up_name) bits.push(it.up_name);
+  bits.push(timeAgo(it.seen_at));
+  for (const b of bits) {
+    const s = document.createElement("span");
+    if (b === src) s.className = "src";
+    s.textContent = b;
+    meta.appendChild(s);
+  }
+
+  entry.append(head, meta);
+  if (it.reason) {
+    const reason = document.createElement("div");
+    reason.className = "rp-reason";
+    reason.textContent = it.reason;
+    entry.appendChild(reason);
+  }
+  return entry;
+}
+
+/* ---------------------------------------------------------------- 逛站记录 */
+let hVerdict = "";
+let hAction = "";
+let hQuery = "";
+let hOffset = 0;
+let hTotal = 0;
+const H_PAGE = 30;
+
+async function loadHistory(reset = false) {
+  if (reset) hOffset = 0;
+  const box = $("h-list");
+  if (reset) {
+    box.innerHTML = "";
+    box.appendChild(emptyNote("加载中…"));
+  }
+  try {
+    const qs = new URLSearchParams({
+      verdict: hVerdict, action: hAction, q: hQuery,
+      limit: String(H_PAGE), offset: String(hOffset),
+    });
+    const r = await api(`/api/browse/history?${qs}`);
+    hTotal = r.total || 0;
+    if (reset) box.innerHTML = "";
+
+    if (!r.items || !r.items.length) {
+      if (reset) box.appendChild(emptyNote("这个条件下还没有记录"));
+    } else {
+      for (const it of r.items) box.appendChild(buildReportEntry(it, { showVerdict: true }));
+    }
+
+    hOffset += (r.items || []).length;
+    const st = r.stats || {};
+    let summary =
+      `共 ${hTotal} 条 · 累计看过 ${st.seen ?? 0} · ` +
+      `记录动作 ${st.actions ?? 0}（真发 ${st.actions_ok ?? 0}）`;
+    if (r.dry_run) summary += " · 演练模式";
+    $("h-summary").textContent = summary;
+    $("h-more-wrap").classList.toggle("hidden", hOffset >= hTotal);
+  } catch (e) {
+    if (reset) {
+      box.innerHTML = "";
+      box.appendChild(emptyNote("读取失败：" + e.message));
+    }
+  }
+}
+
+function bindChipGroup(id, onPick) {
+  const group = $(id);
+  group.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    group.querySelectorAll(".chip").forEach((c) => c.classList.remove("on"));
+    chip.classList.add("on");
+    onPick(chip.dataset.v ?? chip.dataset.a ?? "");
+  });
 }
 
 /* ---------------------------------------------------------------- 交互 */
@@ -1125,6 +1198,23 @@ function bind() {
   $("b-topic-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); addTopic(); }
   });
+
+  // 逛站记录：筛选与分页
+  bindChipGroup("h-verdict", (v) => { hVerdict = v; loadHistory(true); });
+  bindChipGroup("h-action", (a) => { hAction = a; loadHistory(true); });
+  $("btn-h-search").addEventListener("click", () => {
+    hQuery = $("h-q").value.trim();
+    loadHistory(true);
+  });
+  $("h-q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      hQuery = $("h-q").value.trim();
+      loadHistory(true);
+    }
+  });
+  $("btn-h-more").addEventListener("click", () => loadHistory(false));
+
   $("btn-comment-toggle").addEventListener("click", toggleComments);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);

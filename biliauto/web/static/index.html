@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-bot · 管理后台</title>
-<link rel="stylesheet" href="/static/style.css?v=10" />
+<link rel="stylesheet" href="/static/style.css?v=12" />
 </head>
 <body>
 
@@ -20,6 +20,7 @@
       <a href="#/live" data-route="live"><i>◉</i>直播互动</a>
       <a href="#/comments" data-route="comments"><i>❝</i>评论区</a>
       <a href="#/browse" data-route="browse"><i>➤</i>自动逛 B 站</a>
+      <a href="#/history" data-route="history"><i>≡</i>逛站记录</a>
       <a href="#/persona" data-route="persona"><i>☺</i>人设</a>
       <a href="#/settings" data-route="settings"><i>⚙</i>设置</a>
       <a href="#/logs" data-route="logs"><i>≡</i>日志</a>
@@ -285,6 +286,44 @@
       </div>
     </section>
 
+    <!-- ============ 逛站记录 ============ -->
+    <section class="page" data-page="history">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>逛站记录</h2>
+          <span class="hint tiny" id="h-summary"></span>
+        </div>
+
+        <div class="filters">
+          <div class="chips" id="h-verdict">
+            <span class="chip on" data-v="">看过并判断</span>
+            <span class="chip" data-v="acted">互动过</span>
+            <span class="chip" data-v="judged">看过没动</span>
+            <span class="chip" data-v="skip">跳过的</span>
+          </div>
+          <div class="chips" id="h-action">
+            <span class="chip on" data-a="">全部动作</span>
+            <span class="chip" data-a="like">♥ 点赞</span>
+            <span class="chip" data-a="favorite">★ 收藏</span>
+            <span class="chip" data-a="coin">◉ 投币</span>
+            <span class="chip" data-a="follow">＋ 关注</span>
+            <span class="chip" data-a="comment">❝ 评论</span>
+          </div>
+          <div class="up-add filter-search">
+            <input id="h-q" type="text" placeholder="搜标题 / BV 号 / UP 名" />
+            <button class="btn ghost sm" id="btn-h-search" type="button">搜索</button>
+          </div>
+        </div>
+
+        <div class="report-list wide-list" id="h-list">
+          <p class="empty">还没有记录</p>
+        </div>
+        <div class="load-more hidden" id="h-more-wrap">
+          <button class="btn ghost" id="btn-h-more" type="button">加载更多</button>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ 人设 ============ -->
     <section class="page" data-page="persona">
       <div class="card wide">
@@ -375,6 +414,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=13"></script>
 </body>
 </html>

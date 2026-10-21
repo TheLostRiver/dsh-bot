@@ -228,6 +228,7 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-si
 .badge.follow   { color: #56d364; background: rgba(86,211,100,.12);  border-color: rgba(86,211,100,.28); }
 .badge.comment  { color: #79b8ff; background: rgba(121,184,255,.12); border-color: rgba(121,184,255,.28); }
 .badge.bad      { color: var(--bad); background: rgba(248,81,73,.1); border-color: rgba(248,81,73,.25); }
+.badge.dry      { border-style: dashed; opacity: .75; }
 
 .report-list { display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; }
 .rp-entry {
@@ -251,6 +252,17 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-si
 .rp-reason {
   margin-top: 6px; font-size: 12px; color: #a9b4c6; line-height: 1.55;
 }
+
+/* ---------- 记录页筛选 ---------- */
+.filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.filter-search { max-width: 420px; }
+.wide-list { max-height: none; }
+.load-more { display: flex; justify-content: center; margin-top: 14px; }
+.verdict-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; color: var(--dim); border: 1px solid var(--line);
+}
+.verdict-tag.skip { color: #8b93a4; border-style: dashed; }
 
 /* ---------- 日志 ---------- */
 .logbox {
