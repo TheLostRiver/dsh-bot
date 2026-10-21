@@ -103,7 +103,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 96px; }
 .form-grid .full { grid-column: 1 / -1; }
 label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dim); }
 label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 13px; }
-input[type=text], input[type=number], textarea, select {
+input:not([type]), input[type=text], input[type=number], textarea, select {
   background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px;
   width: 100%; outline: none; transition: border-color .15s;

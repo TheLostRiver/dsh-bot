@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-bot · 直播互动后台</title>
-<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/style.css?v=4" />
 </head>
 <body>
 
@@ -132,11 +132,13 @@
           </select>
         </label>
         <label>语速<input id="v-rate" type="text" placeholder="+8%" /></label>
-        <label class="full">音色（从列表挑，也可直接填 ID）
-          <input id="v-voice" list="voice-options" placeholder="zh-CN-XiaoxiaoNeural" />
-          <datalist id="voice-options"></datalist>
+        <label class="full">音色
+          <select id="v-voice"></select>
         </label>
         <label>音调<input id="v-pitch" type="text" placeholder="+0Hz" /></label>
+        <label class="full">自定义音色 ID（填了就用它，忽略上面的选择）
+          <input id="v-voice-custom" type="text" placeholder="例如 en-US-AriaNeural" />
+        </label>
         <label>最长字数<input id="v-max" type="number" min="10" /></label>
       </div>
       <div class="voice-actions">
@@ -170,6 +172,6 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

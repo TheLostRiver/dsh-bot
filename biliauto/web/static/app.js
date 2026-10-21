@@ -7,6 +7,7 @@ let loginTimer = null;
 let statusTimer = null;
 let settingsLoaded = false;
 let botRunning = false;
+let savedVoice = "";
 
 /* ---------------------------------------------------------------- 工具 */
 async function api(path, options = {}) {
@@ -180,7 +181,7 @@ async function loadSettings() {
 
     $("v-enabled").checked = !!s.speech.enabled;
     $("v-backend").value = s.speech.backend;
-    $("v-voice").value = s.speech.voice || "";
+    savedVoice = s.speech.voice || "";
     $("v-rate").value = s.speech.rate || "";
     $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
@@ -223,7 +224,7 @@ function collectSettings() {
     speech: {
       enabled: $("v-enabled").checked,
       backend: $("v-backend").value,
-      voice: $("v-voice").value.trim(),
+      voice: currentVoice(),
       rate: $("v-rate").value.trim() || "+8%",
       pitch: $("v-pitch").value.trim() || "+0Hz",
       max_chars: Math.trunc(num("v-max", 80)),
@@ -303,23 +304,61 @@ async function refreshReplies() {
 
 /* ---------------------------------------------------------------- 语音 */
 async function loadVoices() {
+  const sel = $("v-voice");
   try {
     const r = await api("/api/voices");
-    const dl = $("voice-options");
-    dl.innerHTML = "";
-    for (const v of r.items || []) {
-      const o = document.createElement("option");
-      o.value = v.id;
-      o.label = `${v.name} · ${v.gender} · ${v.locale}`;
-      dl.appendChild(o);
-    }
-    const zh = (r.items || []).filter((v) => v.zh).length;
-    $("voice-count").textContent = `共 ${r.total} 个音色 · 中文 ${zh}`;
-  } catch { /* 音色列表拿不到不影响主流程 */ }
+    const items = r.items || [];
+    sel.innerHTML = "";
+
+    const zh = items.filter((v) => v.zh);
+    const other = items.filter((v) => !v.zh);
+    const addGroup = (label, list) => {
+      if (!list.length) return;
+      const g = document.createElement("optgroup");
+      g.label = label;
+      for (const v of list) {
+        const o = document.createElement("option");
+        o.value = v.id;
+        o.textContent = `${v.name} · ${v.gender}`;
+        g.appendChild(o);
+      }
+      sel.appendChild(g);
+    };
+    addGroup("中文", zh);
+    addGroup("其他语言", other);
+
+    $("voice-count").textContent = `共 ${items.length} 个音色 · 中文 ${zh.length}`;
+    applyVoice(savedVoice);
+  } catch (e) {
+    $("voice-count").textContent = "音色列表加载失败";
+    toast("音色列表加载失败：" + e.message);
+  }
+}
+
+/** 把已保存的音色还原到控件上：列表里有就选中，没有就填进自定义框 */
+function applyVoice(saved) {
+  const sel = $("v-voice");
+  const custom = $("v-voice-custom");
+  const ids = Array.from(sel.options).map((o) => o.value);
+
+  if (saved && ids.includes(saved)) {
+    sel.value = saved;
+    custom.value = "";
+  } else if (saved) {
+    custom.value = saved;
+    if (ids.length) sel.value = ids[0];
+  } else if (ids.length) {
+    sel.value = ids[0];
+  }
+}
+
+function currentVoice() {
+  const custom = $("v-voice-custom").value.trim();
+  return custom || $("v-voice").value || savedVoice;
 }
 
 async function previewVoice() {
-  const voice = $("v-voice").value.trim();
+  const voice = currentVoice();
   const hint = $("preview-hint");
   const btn = $("btn-preview");
   if (!voice) { toast("先选一个音色"); return; }
@@ -390,6 +429,10 @@ function bind() {
   $("btn-toggle").addEventListener("click", toggleBot);
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-preview").addEventListener("click", previewVoice);
+  $("v-voice-custom").addEventListener("input", (e) => {
+    // 一旦填了自定义 ID，就把上面的选择清掉，避免两个值打架
+    if (e.target.value.trim()) $("v-voice").selectedIndex = -1;
+  });
   $("btn-clear-log").addEventListener("click", () => { $("logbox").innerHTML = ""; });
 
   $("t-prob").addEventListener("input", (e) => {
