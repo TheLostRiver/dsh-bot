@@ -119,10 +119,7 @@ class BrowseRunner:
     # ---------- 一轮 ----------
     async def round_once(self) -> RoundResult:
         r = RoundResult()
-        if not self.bc.keywords and not self.bc.zones and not self.bc.ups and not self.bc.topics:
-            r.error = "既没配 UP 主/话题/关键词，也没选分区，不知道该逛哪儿"
-            return r
-
+        # 四种来源都是可选的：都不填就走热门，不拦启动
         try:
             cands = await self.source.discover(self.bc, self.bc.batch)
         except Exception as e:

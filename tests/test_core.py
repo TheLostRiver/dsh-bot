@@ -318,6 +318,24 @@ def test_browse() -> None:
     check("年龄计算正确", 47 < old.age_hours < 49 and fresh.age_hours < 2)
     store.close()
 
+    # 四种来源都不填时必须回落到热门，而不是罢工
+    import asyncio as _asyncio
+
+    from biliauto.browse.source import Source
+
+    empty = replace(cfg.browse, keywords=(), zones=(), ups=(), topics=())
+    src = Source(None)
+    calls = {"hot": 0}
+
+    async def fake_hot(limit):
+        calls["hot"] += 1
+        return [Candidate("BVhot", 1, "热门", 2, "UP", 300, 9000, time.time(), source="hot")]
+
+    src._hot = fake_hot
+    got = _asyncio.run(src.discover(empty, 5))
+    check("空配置回落热门", len(got) == 1 and got[0].source == "hot", str(len(got)))
+    check("确实调用了热门来源", calls["hot"] == 1)
+
 
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")

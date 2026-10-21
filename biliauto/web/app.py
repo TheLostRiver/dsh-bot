@@ -292,8 +292,6 @@ class BrowseManager:
     async def start(self, cfg: AppConfig) -> None:
         if self.running:
             raise RuntimeError("自动逛 B 站已在运行")
-        if not cfg.browse.zones and not cfg.browse.keywords and not cfg.browse.ups and not cfg.browse.topics:
-            raise RuntimeError("没选 UP 主 / 话题 / 关键词 / 分区，不知道逛哪儿")
         self.runner = self._build(cfg)
         self.runner.start()
 
@@ -693,8 +691,6 @@ def create_app() -> FastAPI:
     @app.post("/api/browse/round")
     async def browse_round() -> dict:
         cfg = AppConfig.load()
-        if not cfg.browse.zones and not cfg.browse.keywords and not cfg.browse.ups and not cfg.browse.topics:
-            raise HTTPException(status_code=409, detail="没选 UP 主 / 话题 / 关键词 / 分区")
         try:
             result = await browse_mgr.round_now(cfg)
         except Exception as e:
