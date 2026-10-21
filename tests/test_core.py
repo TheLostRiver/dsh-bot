@@ -337,6 +337,43 @@ def test_browse() -> None:
     check("确实调用了热门来源", calls["hot"] == 1)
 
 
+def test_browse_rebuild() -> None:
+    """手动逛一轮必须用最新配置重建 runner。
+
+    这是踩过的坑：复用旧 runner 会带着旧的 dry_run，
+    表现为「改了关键词没生效」，严重时会把演练当成真发。
+    """
+    print("\n[逛站配置刷新]")
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+
+    from biliauto.web.app import BrowseManager
+
+    class FakeRunner:
+        running = False
+        rounds = 0
+        last_round: dict = {}
+        last_round_at = 0.0
+
+        async def round_once(self):
+            return SimpleNamespace(as_dict=lambda: {"ok": True})
+
+    mgr = BrowseManager()
+    old = FakeRunner()
+    mgr.runner = old
+    built: list[int] = []
+
+    def fake_build(cfg):
+        built.append(1)
+        return FakeRunner()
+
+    mgr._build = fake_build
+    _asyncio.run(mgr.round_now(SimpleNamespace()))
+
+    check("未运行时会重建 runner", built == [1], str(built))
+    check("旧 runner 被替换", mgr.runner is not old)
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -363,7 +400,7 @@ def main() -> int:
         pass
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
                test_store, test_patterns, test_comments, test_browse,
-               test_sender_clamp):
+               test_browse_rebuild, test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0

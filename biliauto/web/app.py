@@ -301,7 +301,9 @@ class BrowseManager:
         self.runner = None
 
     async def round_now(self, cfg: AppConfig) -> dict:
-        if self.runner is None:
+        # 手动一轮必须用「当前设置」重建 runner：
+        # 复用旧 runner 会带着旧的 dry_run / 关键词，甚至真的发出动作。
+        if self.runner is None or not self.runner.running:
             self.runner = self._build(cfg)
         result = await self.runner.round_once()
         self.runner.rounds += 1
