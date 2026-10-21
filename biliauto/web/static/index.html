@@ -3,202 +3,330 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>dsh-bot · 直播互动后台</title>
-<link rel="stylesheet" href="/static/style.css?v=6" />
+<title>dsh-bot · 管理后台</title>
+<link rel="stylesheet" href="/static/style.css?v=7" />
 </head>
 <body>
 
-<header class="topbar">
-  <div class="brand">
-    <span class="dot" id="conn-dot"></span>
-    <h1>dsh-bot</h1>
-    <span class="sub">DeepSeek 自主运营 B 站 · 直播互动</span>
-  </div>
-  <div class="topbar-right">
-    <div class="pill" id="pill-account">账号：未登录</div>
-    <div class="pill" id="pill-room">直播间：—</div>
-    <button class="btn ghost" id="btn-toggle">启动</button>
-  </div>
-</header>
-
-<main>
-  <div id="banner" class="banner hidden"></div>
-
-  <section class="grid">
-
-    <!-- 登录 -->
-    <div class="card" id="card-login">
-      <div class="card-head">
-        <h2>AI 账号登录</h2>
-        <button class="btn ghost sm" id="btn-logout">退出登录</button>
-      </div>
-      <div class="login-body">
-        <div class="qr-wrap">
-          <img id="qr-img" alt="登录二维码" class="hidden" />
-          <div id="qr-placeholder" class="qr-placeholder">用手机 B 站扫码</div>
-        </div>
-        <div class="login-side">
-          <p class="hint">扫码后选择「<b>记住我 / 长期</b>」那张，否则第二天就得重扫。</p>
-          <p class="login-state" id="login-state">未登录</p>
-          <button class="btn" id="btn-login">生成二维码</button>
-          <p class="hint tiny">凭据只存本机 <code>data/credentials.json</code>，不会回显到页面，也不上传。</p>
-        </div>
-      </div>
+<div class="app">
+  <!-- 侧边栏 -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="dot" id="conn-dot"></span>
+      <span class="logo-text">dsh-bot</span>
     </div>
+    <nav class="nav">
+      <a href="#/overview" data-route="overview"><i>▦</i>概览</a>
+      <a href="#/live" data-route="live"><i>◉</i>直播互动</a>
+      <a href="#/comments" data-route="comments"><i>❝</i>评论区</a>
+      <a href="#/browse" data-route="browse"><i>➤</i>自动逛 B 站</a>
+      <a href="#/persona" data-route="persona"><i>☺</i>人设</a>
+      <a href="#/settings" data-route="settings"><i>⚙</i>设置</a>
+      <a href="#/logs" data-route="logs"><i>≡</i>日志</a>
+    </nav>
+    <div class="sidebar-foot" id="side-status">未连接</div>
+  </aside>
 
-    <!-- 运行状态 -->
-    <div class="card">
-      <div class="card-head"><h2>运行状态</h2></div>
-      <dl class="stat-list">
-        <div><dt>回复</dt><dd id="st-replied">0</dd></div>
-        <div><dt>忽略</dt><dd id="st-ignored">0</dd></div>
-        <div><dt>候选</dt><dd id="st-considered">0</dd></div>
-        <div><dt>排队</dt><dd id="st-queued">0</dd></div>
-        <div><dt>今日已发</dt><dd id="st-sent">0</dd></div>
-        <div><dt>已运行</dt><dd id="st-uptime">—</dd></div>
-      </dl>
-    </div>
-
-    <!-- 人设 -->
-    <div class="card wide">
-      <div class="card-head">
-        <h2>人设</h2>
-        <div class="head-actions">
-          <span class="hint tiny">决定它说话像谁</span>
-          <button class="btn ghost sm" id="btn-preview-persona" type="button">预览效果</button>
-        </div>
+  <!-- 主区域 -->
+  <main class="content">
+    <header class="page-head">
+      <h1 id="page-title">概览</h1>
+      <div class="page-pills">
+        <div class="pill" id="pill-account">账号：未登录</div>
+        <div class="pill" id="pill-room">直播间：—</div>
       </div>
-      <div class="form-grid">
-        <label>角色名<input id="p-name" type="text" /></label>
-        <label>口头禅<input id="p-catch" type="text" placeholder="留空则不使用" /></label>
-        <label class="full">说话风格<textarea id="p-style" rows="2"></textarea></label>
-        <label class="full">设定<textarea id="p-bio" rows="3"></textarea></label>
-        <label class="full">别名（命中就必回，逗号分隔）<input id="p-aliases" type="text" /></label>
-      </div>
-    </div>
+    </header>
 
-    <!-- 目标直播间 -->
-    <div class="card">
-      <div class="card-head"><h2>目标直播间</h2></div>
-      <div class="form-grid">
-        <label class="full">房号<input id="s-room" type="number" min="0" /></label>
-        <label class="check full"><input id="s-dryrun" type="checkbox" /><span>演练模式（只决策不发弹幕）</span></label>
-      </div>
-      <p class="hint tiny">填你自己的直播间数字 ID，跟 AI 账号无关。</p>
-    </div>
+    <div id="banner" class="banner hidden"></div>
 
-    <!-- 触发策略 -->
-    <div class="card">
-      <div class="card-head"><h2>触发策略</h2></div>
-      <div class="form-grid">
-        <label class="full">
-          普通闲聊回复概率
-          <div class="range-row">
-            <input id="t-prob" type="range" min="0" max="1" step="0.01" />
-            <output id="t-prob-out">0.12</output>
+    <!-- ============ 概览 ============ -->
+    <section class="page" data-page="overview">
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><h2>直播互动</h2>
+            <div class="head-actions">
+              <span class="hint tiny" id="ov-live-state">未启动</span>
+              <button class="btn sm" id="btn-toggle">启动</button>
+            </div>
           </div>
-        </label>
-        <label class="check full"><input id="t-question" type="checkbox" /><span>提问必回</span></label>
-        <label class="full">忽略规则（一行一个正则）<textarea id="t-ignore" rows="4" spellcheck="false"></textarea></label>
-      </div>
-      <p class="hint tiny">SC、上舰、被叫名字 不受概率影响，最高优先。</p>
-    </div>
+          <dl class="stat-list">
+            <div><dt>回复</dt><dd id="st-replied">0</dd></div>
+            <div><dt>忽略</dt><dd id="st-ignored">0</dd></div>
+            <div><dt>候选</dt><dd id="st-considered">0</dd></div>
+            <div><dt>排队</dt><dd id="st-queued">0</dd></div>
+            <div><dt>今日弹幕</dt><dd id="st-sent">0</dd></div>
+            <div><dt>已运行</dt><dd id="st-uptime">—</dd></div>
+          </dl>
+        </div>
 
-    <!-- 配额 -->
-    <div class="card">
-      <div class="card-head">
-        <h2>发送配额</h2>
-        <span class="hint tiny">账号的生命线</span>
-      </div>
-      <div class="form-grid two">
-        <label>最小间隔（秒）<input id="g-interval" type="number" min="1" step="1" /></label>
-        <label>每分钟上限<input id="g-minute" type="number" min="1" /></label>
-        <label>每小时上限<input id="g-hour" type="number" min="1" /></label>
-        <label>每天上限<input id="g-day" type="number" min="1" /></label>
-        <label>同人冷却（秒）<input id="g-user" type="number" min="0" /></label>
-        <label>弹幕字数上限<input id="g-len" type="number" min="4" /></label>
-      </div>
-    </div>
-
-    <!-- 语音 -->
-    <div class="card">
-      <div class="card-head">
-        <h2>语音播报</h2>
-        <span class="hint tiny" id="voice-count"></span>
-      </div>
-      <div class="form-grid">
-        <label class="check full"><input id="v-enabled" type="checkbox" /><span>开启 TTS</span></label>
-        <label>输出方式
-          <select id="v-backend">
-            <option value="file">file · 只落 mp3（给 OBS）</option>
-            <option value="play">play · 本机播放（配 VB-Cable）</option>
-          </select>
-        </label>
-        <label>语速<input id="v-rate" type="text" placeholder="+8%" /></label>
-        <label class="full">音色
-          <select id="v-voice"></select>
-        </label>
-        <label>音调<input id="v-pitch" type="text" placeholder="+0Hz" /></label>
-        <label class="full">自定义音色 ID（填了就用它，忽略上面的选择）
-          <input id="v-voice-custom" type="text" placeholder="例如 en-US-AriaNeural" />
-        </label>
-        <label>最长字数<input id="v-max" type="number" min="10" /></label>
-      </div>
-      <div class="voice-actions">
-        <button class="btn ghost sm" id="btn-preview" type="button">▶ 试听</button>
-        <span class="hint tiny" id="preview-hint">改完音色和音调，先试听再保存</span>
-      </div>
-    </div>
-
-    <!-- 评论区值班 -->
-    <div class="card wide">
-      <div class="card-head">
-        <h2>评论区值班</h2>
-        <div class="head-actions">
-          <span class="hint tiny" id="c-stats">未启动</span>
-          <button class="btn ghost sm" id="btn-comment-scan" type="button">立即扫一轮</button>
-          <button class="btn sm" id="btn-comment-toggle" type="button">启动</button>
+        <div class="card">
+          <div class="card-head"><h2>今天的量</h2></div>
+          <dl class="stat-list">
+            <div><dt>已点赞</dt><dd id="ov-like">0</dd></div>
+            <div><dt>已收藏</dt><dd id="ov-fav">0</dd></div>
+            <div><dt>已评论</dt><dd id="ov-comment">0</dd></div>
+            <div><dt>评论回复</dt><dd id="ov-creply">0</dd></div>
+            <div><dt>逛过</dt><dd id="ov-seen">0</dd></div>
+            <div><dt>动作总数</dt><dd id="ov-actions">0</dd></div>
+          </dl>
         </div>
       </div>
-      <p class="hint">轮询主播最近几个视频下的新评论，用 AI 账号接话。读取评论也必须带凭据，所以要先登录。</p>
-      <div class="form-grid">
-        <label class="check full"><input id="c-enabled" type="checkbox" /><span>服务器启动时自动开始值班</span></label>
-        <label>UP 主 UID（0 = 从房号自动推导）<input id="c-upmid" type="number" min="0" /></label>
-        <label>盯最近几个视频<input id="c-videos" type="number" min="1" max="30" /></label>
-        <label>扫描间隔（秒）<input id="c-interval" type="number" min="60" /></label>
-        <label>只回几小时内的<input id="c-lookback" type="number" min="1" step="0.5" /></label>
-        <label>每天最多回几条<input id="c-day" type="number" min="1" /></label>
-        <label>两条最小间隔（秒）<input id="c-gap" type="number" min="10" /></label>
-        <label>评论字数上限<input id="c-len" type="number" min="10" /></label>
-        <label>普通评论回复概率<input id="c-prob" type="number" min="0" max="1" step="0.05" /></label>
+
+      <div class="card wide">
+        <div class="card-head"><h2>最近回复（直播）</h2></div>
+        <div class="replybox" id="replybox"><p class="hint">还没有回复记录。</p></div>
       </div>
-      <div class="replybox" id="comment-replies" style="margin-top:14px">
-        <p class="hint">还没有评论回复记录。</p>
+    </section>
+
+    <!-- ============ 直播互动 ============ -->
+    <section class="page" data-page="live">
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><h2>触发策略</h2></div>
+          <div class="form-grid">
+            <label class="full">
+              普通闲聊回复概率
+              <div class="range-row">
+                <input id="t-prob" type="range" min="0" max="1" step="0.01" />
+                <output id="t-prob-out">0.12</output>
+              </div>
+            </label>
+            <label class="check full"><input id="t-question" type="checkbox" /><span>提问必回</span></label>
+            <label class="full">忽略规则（一行一个正则）<textarea id="t-ignore" rows="5" spellcheck="false"></textarea></label>
+          </div>
+          <p class="hint tiny">SC、上舰、被叫名字不受概率影响，最高优先。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>发送配额</h2><span class="hint tiny">账号的生命线</span></div>
+          <div class="form-grid two">
+            <label>最小间隔（秒）<input id="g-interval" type="number" min="1" step="1" /></label>
+            <label>每分钟上限<input id="g-minute" type="number" min="1" /></label>
+            <label>每小时上限<input id="g-hour" type="number" min="1" /></label>
+            <label>每天上限<input id="g-day" type="number" min="1" /></label>
+            <label>同人冷却（秒）<input id="g-user" type="number" min="0" /></label>
+            <label>弹幕字数上限<input id="g-len" type="number" min="4" /></label>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <!-- 日志 -->
-    <div class="card wide">
-      <div class="card-head">
-        <h2>实时日志</h2>
-        <button class="btn ghost sm" id="btn-clear-log">清屏</button>
+      <div class="card wide">
+        <div class="card-head"><h2>语音播报</h2><span class="hint tiny" id="voice-count"></span></div>
+        <div class="form-grid">
+          <label class="check full"><input id="v-enabled" type="checkbox" /><span>开启 TTS</span></label>
+          <label>输出方式
+            <select id="v-backend">
+              <option value="file">file · 只落 mp3（给 OBS）</option>
+              <option value="play">play · 本机播放（配 VB-Cable）</option>
+            </select>
+          </label>
+          <label>语速<input id="v-rate" type="text" placeholder="+8%" /></label>
+          <label class="full">音色
+            <select id="v-voice"></select>
+          </label>
+          <label>音调<input id="v-pitch" type="text" placeholder="+0Hz" /></label>
+          <label class="full">自定义音色 ID（填了就用它）
+            <input id="v-voice-custom" type="text" placeholder="例如 en-US-AriaNeural" />
+          </label>
+          <label>最长字数<input id="v-max" type="number" min="10" /></label>
+        </div>
+        <div class="voice-actions">
+          <button class="btn ghost sm" id="btn-preview" type="button">▶ 试听</button>
+          <span class="hint tiny" id="preview-hint">改完音色和音调，先试听再保存</span>
+        </div>
       </div>
-      <div class="logbox" id="logbox"></div>
-    </div>
+    </section>
 
-    <!-- 最近回复 -->
-    <div class="card wide">
-      <div class="card-head"><h2>最近回复</h2></div>
-      <div class="replybox" id="replybox"><p class="hint">还没有回复记录。</p></div>
-    </div>
+    <!-- ============ 评论区 ============ -->
+    <section class="page" data-page="comments">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>评论区值班</h2>
+          <div class="head-actions">
+            <span class="hint tiny" id="c-stats">未启动</span>
+            <button class="btn ghost sm" id="btn-comment-scan" type="button">立即扫一轮</button>
+            <button class="btn sm" id="btn-comment-toggle" type="button">启动</button>
+          </div>
+        </div>
+        <p class="hint">轮询主播最近几个视频下的新评论，用 AI 账号接话。读取评论也必须带凭据，所以要先登录。</p>
+        <div class="form-grid">
+          <label class="check full"><input id="c-enabled" type="checkbox" /><span>服务器启动时自动开始值班</span></label>
+          <label>UP 主 UID（0 = 从房号自动推导）<input id="c-upmid" type="number" min="0" /></label>
+          <label>盯最近几个视频<input id="c-videos" type="number" min="1" max="30" /></label>
+          <label>扫描间隔（秒）<input id="c-interval" type="number" min="60" /></label>
+          <label>只回几小时内的<input id="c-lookback" type="number" min="1" step="0.5" /></label>
+          <label>每天最多回几条<input id="c-day" type="number" min="1" /></label>
+          <label>两条最小间隔（秒）<input id="c-gap" type="number" min="10" /></label>
+          <label>评论字数上限<input id="c-len" type="number" min="10" /></label>
+          <label>普通评论回复概率<input id="c-prob" type="number" min="0" max="1" step="0.05" /></label>
+        </div>
+        <div class="replybox" id="comment-replies" style="margin-top:14px">
+          <p class="hint">还没有评论回复记录。</p>
+        </div>
+      </div>
+    </section>
 
-  </section>
+    <!-- ============ 自动逛 B 站 ============ -->
+    <section class="page" data-page="browse">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>浏览来源</h2>
+          <div class="head-actions">
+            <span class="hint tiny" id="b-stats">未启动</span>
+            <button class="btn ghost sm" id="btn-browse-round" type="button">立即逛一轮</button>
+            <button class="btn sm" id="btn-browse-toggle" type="button">启动</button>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label class="full">关键词（逗号分隔，留空则只看分区）
+            <input id="b-keywords" type="text" placeholder="怪物猎人, 编程" />
+          </label>
+          <label class="full">分区（不选分区则只能靠关键词）</label>
+          <div class="chips full" id="b-zones"></div>
+          <label>每轮挑几个<input id="b-batch" type="number" min="1" max="20" /></label>
+          <label>每轮最多读几条字幕<input id="b-llm" type="number" min="1" max="10" /></label>
+          <label>排序
+            <select id="b-order">
+              <option value="pubdate">最新发布</option>
+              <option value="click">最多播放</option>
+              <option value="dm">最多弹幕</option>
+            </select>
+          </label>
+          <label>只逛几天内的（关键词模式）<input id="b-days" type="number" min="1" /></label>
+          <label>每轮间隔（秒）<input id="b-interval" type="number" min="60" /></label>
+          <label>收藏夹名字<input id="b-folder" type="text" /></label>
+        </div>
+        <p class="hint tiny">读字幕要花 token：每轮最多判断「几条字幕」那个数字就是成本阀门。</p>
+      </div>
 
-  <div class="savebar">
-    <span class="hint" id="save-hint">改完记得保存</span>
-    <button class="btn primary" id="btn-save">保存设置</button>
-  </div>
-</main>
+      <div class="card wide">
+        <div class="card-head"><h2>动作矩阵</h2><span class="hint tiny">每个动作独立开关 + 配额</span></div>
+        <table class="matrix">
+          <thead>
+            <tr><th>动作</th><th>开启</th><th>每日上限</th><th>命中概率</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>点赞</td>
+              <td><input type="checkbox" id="b-like-enabled" /></td>
+              <td><input type="number" id="b-like-day" min="0" /></td>
+              <td><input type="number" id="b-like-prob" min="0" max="1" step="0.05" /></td>
+              <td class="hint tiny">风险低，默认开</td>
+            </tr>
+            <tr>
+              <td>收藏</td>
+              <td><input type="checkbox" id="b-fav-enabled" /></td>
+              <td><input type="number" id="b-fav-day" min="0" /></td>
+              <td><input type="number" id="b-fav-prob" min="0" max="1" step="0.05" /></td>
+              <td class="hint tiny">只收藏到上面那个收藏夹</td>
+            </tr>
+            <tr>
+              <td>投币</td>
+              <td><input type="checkbox" id="b-coin-enabled" /></td>
+              <td><input type="number" id="b-coin-day" min="0" /></td>
+              <td><input type="number" id="b-coin-prob" min="0" max="1" step="0.05" /></td>
+              <td class="hint tiny"><b>会花账号真硬币</b>，默认关</td>
+            </tr>
+            <tr>
+              <td>关注</td>
+              <td><input type="checkbox" id="b-follow-enabled" /></td>
+              <td><input type="number" id="b-follow-day" min="0" /></td>
+              <td><input type="number" id="b-follow-prob" min="0" max="1" step="0.05" /></td>
+              <td class="hint tiny">改变账号关系，默认关</td>
+            </tr>
+            <tr>
+              <td>评论</td>
+              <td><input type="checkbox" id="b-comment-enabled" /></td>
+              <td><input type="number" id="b-comment-day" min="0" /></td>
+              <td><input type="number" id="b-comment-prob" min="0" max="1" step="0.05" /></td>
+              <td class="hint tiny">风险最高，默认关</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><h2>最近动作</h2></div>
+          <div class="replybox" id="browse-actions"><p class="hint">还没有动作记录。</p></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>今日报告</h2></div>
+          <pre class="report" id="browse-report">还没有报告。</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 人设 ============ -->
+    <section class="page" data-page="persona">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>人设</h2>
+          <div class="head-actions">
+            <span class="hint tiny">决定它说话像谁</span>
+            <button class="btn ghost sm" id="btn-preview-persona" type="button">预览效果</button>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label>角色名<input id="p-name" type="text" /></label>
+          <label>口头禅<input id="p-catch" type="text" placeholder="留空则不使用" /></label>
+          <label class="full">说话风格<textarea id="p-style" rows="2"></textarea></label>
+          <label class="full">设定<textarea id="p-bio" rows="4"></textarea></label>
+          <label class="full">别名（命中就必回，逗号分隔）<input id="p-aliases" type="text" /></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 设置 ============ -->
+    <section class="page" data-page="settings">
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><h2>AI 账号登录</h2>
+            <button class="btn ghost sm" id="btn-logout">退出登录</button>
+          </div>
+          <div class="login-body">
+            <div class="qr-wrap">
+              <img id="qr-img" alt="登录二维码" class="hidden" />
+              <div id="qr-placeholder" class="qr-placeholder">用手机 B 站扫码</div>
+            </div>
+            <div class="login-side">
+              <p class="hint">扫码后选「<b>记住我 / 长期</b>」，否则第二天就得重扫。</p>
+              <p class="login-state" id="login-state">未登录</p>
+              <button class="btn" id="btn-login">生成二维码</button>
+              <p class="hint tiny">凭据只存本机 <code>data/credentials.json</code>，不回显、不上传。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>目标直播间</h2></div>
+          <div class="form-grid">
+            <label class="full">房号<input id="s-room" type="number" min="0" /></label>
+            <label class="check full"><input id="s-dryrun" type="checkbox" /><span>演练模式（只决策不发送）</span></label>
+          </div>
+          <p class="hint tiny">填你自己的直播间数字 ID，跟 AI 账号无关。评论区会自动从这个房号推导主播 uid。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 日志 ============ -->
+    <section class="page" data-page="logs">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>实时日志</h2>
+          <button class="btn ghost sm" id="btn-clear-log">清屏</button>
+        </div>
+        <div class="logbox" id="logbox"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="savebar" id="savebar">
+  <span class="hint" id="save-hint">改完记得保存</span>
+  <button class="btn primary" id="btn-save">保存设置</button>
+</div>
 
 <div id="persona-modal" class="modal hidden">
   <div class="modal-box">
@@ -206,7 +334,7 @@
       <h3>人设预览</h3>
       <button class="btn ghost sm" id="btn-pv-close" type="button">关闭</button>
     </div>
-    <p class="hint">用表单里<b>当前的人设</b>（还没保存也生效）真跑一次决策，看看像不像。每次试说会消耗一次模型调用。</p>
+    <p class="hint">用表单里<b>当前的人设</b>（还没保存也生效）真跑一次决策。每次试说会消耗一次模型调用。</p>
     <label class="pv-input-label">模拟一条观众弹幕
       <textarea id="pv-text" rows="2" placeholder="主播今天播到几点啊？"></textarea>
     </label>
@@ -219,7 +347,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>

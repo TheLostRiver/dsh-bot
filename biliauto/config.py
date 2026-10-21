@@ -73,6 +73,17 @@ def _split_patterns(raw: str) -> tuple[str, ...]:
     return tuple(p.strip() for p in parts if p.strip())
 
 
+def _ints(name: str, default: str = "") -> tuple[int, ...]:
+    """解析 "4,36,188" 这种分区 tid 列表，顺手容忍中文逗号。"""
+    raw = _str(name, default)
+    out: list[int] = []
+    for x in raw.replace("，", ",").split(","):
+        x = x.strip()
+        if x.isdigit():
+            out.append(int(x))
+    return tuple(out)
+
+
 def _patterns(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw = _str(name)
     return _split_patterns(raw) if raw else default
@@ -145,6 +156,36 @@ class CommentConfig:
 
 
 @dataclass(frozen=True)
+class ActionSpec:
+    """一个可开关的互动动作：独立开关 + 日配额 + 命中概率。"""
+
+    enabled: bool = False
+    per_day: int = 10
+    probability: float = 0.3
+
+
+@dataclass(frozen=True)
+class BrowseConfig:
+    """自动逛 B 站：按分区/关键词找视频，看完再决定要不要互动。"""
+
+    enabled: bool
+    interval: float
+    batch: int            # 每轮挑几条候选
+    max_llm: int          # 每轮最多读几条字幕（烧 token 的大头）
+    zones: tuple[str, ...]   # RankType 名字，如 Game / Knowledge / Technology
+    keywords: tuple[str, ...]
+    days: int
+    order: str            # pubdate / click / dm
+    max_subtitle_chars: int
+    favorite_folder: str
+    like: ActionSpec
+    coin: ActionSpec
+    favorite: ActionSpec
+    follow: ActionSpec
+    comment: ActionSpec
+
+
+@dataclass(frozen=True)
 class SpeechConfig:
     enabled: bool
     backend: str
@@ -165,6 +206,7 @@ class AppConfig:
     trigger: TriggerConfig
     guard: GuardConfig
     comments: CommentConfig
+    browse: BrowseConfig
     speech: SpeechConfig
     dry_run: bool
     log_level: str
@@ -232,6 +274,24 @@ class AppConfig:
                 reply_probability=min(
                     max(_float("COMMENT_REPLY_PROBABILITY", 0.5), 0.0), 1.0
                 ),
+            ),
+            browse=BrowseConfig(
+                enabled=_bool("BROWSE_ENABLED", False),
+                interval=_float("BROWSE_INTERVAL", 1800.0),
+                batch=_int("BROWSE_BATCH", 6),
+                max_llm=_int("BROWSE_MAX_LLM", 3),
+                zones=_csv("BROWSE_ZONES", ""),
+                keywords=_csv("BROWSE_KEYWORDS", ""),
+                days=_int("BROWSE_DAYS", 7),
+                order=_str("BROWSE_ORDER", "pubdate").lower(),
+                max_subtitle_chars=_int("BROWSE_MAX_SUBTITLE_CHARS", 6000),
+                favorite_folder=_str("BROWSE_FAVORITE_FOLDER", "AI 精选"),
+                # 点赞低风险默认开；投币要花硬币、关注改关系，默认关
+                like=ActionSpec(True, _int("BROWSE_LIKE_PER_DAY", 20), 0.7),
+                coin=ActionSpec(False, 5, 0.2),
+                favorite=ActionSpec(False, _int("BROWSE_FAV_PER_DAY", 10), 0.3),
+                follow=ActionSpec(False, 2, 0.1),
+                comment=ActionSpec(False, 5, 0.3),
             ),
             speech=SpeechConfig(
                 enabled=_bool("SPEECH_ENABLED", True),
@@ -340,6 +400,17 @@ def _apply_credential(cfg: AppConfig, cred: dict) -> AppConfig:
     )
 
 
+def _action(src: dict, key: str, default: ActionSpec) -> ActionSpec:
+    d = _sub(src, key)
+    if not d:
+        return default
+    return ActionSpec(
+        enabled=_bol(d, "enabled", default.enabled),
+        per_day=max(0, _num(d, "per_day", default.per_day, int)),
+        probability=min(max(_num(d, "probability", default.probability), 0.0), 1.0),
+    )
+
+
 def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
     if not s:
         return cfg
@@ -348,6 +419,7 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
     guard = _sub(s, "guard")
     speech = _sub(s, "speech")
     comments = _sub(s, "comments")
+    browse = _sub(s, "browse")
 
     return replace(
         cfg,
@@ -412,6 +484,36 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
                 ),
                 1.0,
             ),
+        ),
+        browse=replace(
+            cfg.browse,
+            enabled=_bol(browse, "enabled", cfg.browse.enabled),
+            interval=_num(browse, "interval", cfg.browse.interval),
+            batch=_num(browse, "batch", cfg.browse.batch, int),
+            max_llm=_num(browse, "max_llm", cfg.browse.max_llm, int),
+            zones=(
+                tuple(str(x).strip() for x in browse.get("zones", []) if str(x).strip())
+                if "zones" in browse
+                else cfg.browse.zones
+            ),
+            keywords=(
+                tuple(str(x).strip() for x in browse.get("keywords", []) if str(x).strip())
+                if "keywords" in browse
+                else cfg.browse.keywords
+            ),
+            days=_num(browse, "days", cfg.browse.days, int),
+            order=_txt(browse, "order", cfg.browse.order),
+            max_subtitle_chars=_num(
+                browse, "max_subtitle_chars", cfg.browse.max_subtitle_chars, int
+            ),
+            favorite_folder=_txt(
+                browse, "favorite_folder", cfg.browse.favorite_folder
+            ),
+            like=_action(browse, "like", cfg.browse.like),
+            coin=_action(browse, "coin", cfg.browse.coin),
+            favorite=_action(browse, "favorite", cfg.browse.favorite),
+            follow=_action(browse, "follow", cfg.browse.follow),
+            comment=_action(browse, "comment", cfg.browse.comment),
         ),
         speech=replace(
             cfg.speech,

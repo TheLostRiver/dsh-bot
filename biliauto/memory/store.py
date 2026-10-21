@@ -85,6 +85,39 @@ CREATE TABLE IF NOT EXISTS comment_replies (
     error    TEXT,
     ts       REAL NOT NULL
 );
+
+-- 自动逛 B 站：看过哪些视频
+CREATE TABLE IF NOT EXISTS browse_seen (
+    bvid     TEXT PRIMARY KEY,
+    aid      INTEGER,
+    title    TEXT,
+    up_mid   INTEGER,
+    up_name  TEXT,
+    duration INTEGER,
+    play     INTEGER,
+    pubdate  REAL,
+    seen_at  REAL NOT NULL,
+    verdict  TEXT,
+    reason   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS browse_actions (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts     REAL NOT NULL,
+    bvid   TEXT,
+    action TEXT,
+    ok     INTEGER NOT NULL DEFAULT 0,
+    error  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_browse_actions_ts ON browse_actions(ts);
+
+-- 通用动作用量：以后加动作不用改表结构
+CREATE TABLE IF NOT EXISTS action_usage (
+    day    TEXT NOT NULL,
+    action TEXT NOT NULL,
+    count  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, action)
+);
 """
 
 # 老库升级：usage 表后加的列
@@ -366,6 +399,101 @@ class Store:
             "replied": row["ok"] or 0,
             "attempts": row["total"] or 0,
             "seen": seen["c"] or 0,
+        }
+
+    # ---------- 自动逛 B 站 ----------
+    def browse_seen(self, bvid: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM browse_seen WHERE bvid=?", (bvid,)
+            ).fetchone()
+        return row is not None
+
+    def record_browse(
+        self,
+        bvid: str,
+        aid: int,
+        title: str,
+        up_mid: int,
+        up_name: str,
+        duration: int,
+        play: int,
+        pubdate: float,
+        verdict: str,
+        reason: str = "",
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO browse_seen"
+                " (bvid, aid, title, up_mid, up_name, duration, play, pubdate,"
+                "  seen_at, verdict, reason) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    bvid, aid, title, up_mid, up_name, duration, play,
+                    pubdate, time.time(), verdict, reason,
+                ),
+            )
+            self._conn.commit()
+
+    def log_action(self, bvid: str, action: str, ok: bool, error: str = "") -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO browse_actions (ts, bvid, action, ok, error)"
+                " VALUES (?,?,?,?,?)",
+                (time.time(), bvid, action, int(ok), error),
+            )
+            self._conn.commit()
+
+    def recent_actions(self, limit: int = 40) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT a.ts, a.bvid, a.action, a.ok, a.error, b.title"
+                " FROM browse_actions a LEFT JOIN browse_seen b ON b.bvid = a.bvid"
+                " ORDER BY a.id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def incr_action(self, action: str, delta: int = 1) -> int:
+        day = self._today()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO action_usage (day, action, count) VALUES (?,?,?)"
+                " ON CONFLICT(day, action) DO UPDATE SET count = count + ?",
+                (day, action, delta, delta),
+            )
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT count FROM action_usage WHERE day=? AND action=?", (day, action)
+            ).fetchone()
+        return int(row["count"]) if row else delta
+
+    def action_used(self, action: str) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT count FROM action_usage WHERE day=? AND action=?",
+                (self._today(), action),
+            ).fetchone()
+        return int(row["count"]) if row else 0
+
+    def actions_today(self) -> dict:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT action, count FROM action_usage WHERE day=?", (self._today(),)
+            ).fetchall()
+        return {r["action"]: r["count"] for r in rows}
+
+    def browse_stats(self) -> dict:
+        with self._lock:
+            seen = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM browse_seen"
+            ).fetchone()
+            acted = self._conn.execute(
+                "SELECT COUNT(*) AS c, SUM(ok) AS ok FROM browse_actions"
+            ).fetchone()
+        return {
+            "seen": seen["c"] or 0,
+            "actions": acted["c"] or 0,
+            "actions_ok": acted["ok"] or 0,
         }
 
     # ---------- KV ----------

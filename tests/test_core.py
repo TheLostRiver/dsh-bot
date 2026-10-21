@@ -263,6 +263,62 @@ def test_comments() -> None:
     s.close()
 
 
+def test_browse() -> None:
+    print("\n[自动逛 B 站]")
+    from dataclasses import replace
+
+    from biliauto.browse.actions import InteractionPerformer
+    from biliauto.browse.source import Candidate, _duration_seconds
+    from biliauto.config import ActionSpec, AppConfig
+
+    # duration 有时是 "12:34"，有时是秒数
+    check("解析 mm:ss", _duration_seconds("12:34") == 754)
+    check("解析 hh:mm:ss", _duration_seconds("1:02:03") == 3723)
+    check("解析纯秒", _duration_seconds("90") == 90)
+    check("脏数据归零", _duration_seconds("abc") == 0)
+
+    cfg = AppConfig.load()
+    bc = replace(
+        cfg.browse,
+        like=ActionSpec(True, 2, 1.0),
+        coin=ActionSpec(False, 5, 1.0),
+        favorite=ActionSpec(True, 2, 0.0),
+    )
+    tmp = Path(tempfile.mkdtemp()) / "b.db"
+    store = Store(tmp)
+    perf = InteractionPerformer(bc, store, None, dry_run=True)
+
+    ok, why = perf.gate("like", bc.like)
+    check("开启且未超限可执行", ok and why == "ok", why)
+
+    ok, why = perf.gate("coin", bc.coin)
+    check("关闭的动作直接跳过", not ok and why == "disabled", why)
+
+    ok, why = perf.gate("favorite", bc.favorite)
+    check("概率 0 时跳过", not ok and why == "miss", why)
+
+    store.incr_action("like")
+    store.incr_action("like")
+    ok, why = perf.gate("like", bc.like)
+    check("达到日上限后拦截", not ok and why == "per_day", why)
+
+    check("按动作分别计量", store.action_used("like") == 2 and store.action_used("coin") == 0)
+
+    # 记录与统计
+    store.record_browse("BV1xx", 1, "标题", 2, "UP", 300, 5000, time.time(),
+                        "like", "值得一看")
+    check("看过的视频被记住", store.browse_seen("BV1xx") is True)
+    store.log_action("BV1xx", "like", True, "ok")
+    stats = store.browse_stats()
+    check("动作统计", stats["seen"] == 1 and stats["actions_ok"] == 1, str(stats))
+
+    # 候选对象的年龄
+    old = Candidate("BV1old", 1, "老视频", 2, "UP", 300, 5000, time.time() - 3600 * 48)
+    fresh = Candidate("BV1new", 1, "新视频", 2, "UP", 300, 5000, time.time() - 3600)
+    check("年龄计算正确", 47 < old.age_hours < 49 and fresh.age_hours < 2)
+    store.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -288,7 +344,8 @@ def main() -> int:
     except Exception:
         pass
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
-               test_store, test_patterns, test_comments, test_sender_clamp):
+               test_store, test_patterns, test_comments, test_browse,
+               test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0

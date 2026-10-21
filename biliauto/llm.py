@@ -70,8 +70,19 @@ class Brain:
     async def decide(
         self, messages: list[dict], max_danmaku_len: int = 20
     ) -> Reply:
+        reply, _ = await self.decide_json(messages, max_danmaku_len)
+        return reply
+
+    async def decide_json(
+        self, messages: list[dict], max_danmaku_len: int = 20
+    ) -> tuple[Reply, dict]:
+        """除了规整后的 Reply，还把模型原始 JSON 一起返回。
+
+        有些场景（比如逛 B 站的 like/coin/favorite 布尔位）需要原始字段，
+        而 Reply 只有三个通用槽位，装不下。
+        """
         if self._client is None:
-            return self._offline_reply(messages)
+            return self._offline_reply(messages), {}
         try:
             resp = await self._client.chat.completions.create(
                 model=self.cfg.model,
@@ -80,17 +91,17 @@ class Brain:
                 max_tokens=self.cfg.max_tokens,
                 response_format={"type": "json_object"},
             )
-        except Exception as e:  # 网络/限流/额度，任何一种都不该让直播挂掉
+        except Exception as e:  # 网络/限流/额度，任何一种都不该让主流程挂掉
             log.warning("DeepSeek 调用失败，本轮跳过：%s", e)
-            return Reply(should_reply=False)
+            return Reply(should_reply=False), {}
 
         raw = (resp.choices[0].message.content or "").strip()
         data = _extract_json(raw)
         if data is None:
             log.warning("模型返回无法解析为 JSON：%r", raw[:200])
-            return Reply(should_reply=False)
+            return Reply(should_reply=False), {}
 
-        return self._coerce(data, max_danmaku_len)
+        return self._coerce(data, max_danmaku_len), data
 
     # ---------- 内部 ----------
     @staticmethod
@@ -125,6 +136,41 @@ class Brain:
             speech=f"（离线模式）我听到了：{snippet}",
             mood="neutral",
         )
+
+
+def build_browse_prompt(persona, max_len: int) -> str:
+    """自动逛 B 站时判断"要不要互动、怎么互动"的提示词。"""
+    return f"""你在 B 站闲逛。下面给你一个视频的标题、简介和字幕原文。
+你要像真人一样判断：**这条我到底看不看得下去**，再决定要不要留下痕迹。
+
+# 你的身份
+名字：{persona.name}
+设定：{persona.bio}
+说话风格：{persona.style}
+
+# 判断标准
+- worth=false：标题党、纯广告、搬运、水视频、你根本不感兴趣的题材、字幕明显对不上。
+- worth=true：你真的看进去了，能说出至少一个具体的点。
+
+**不要为了"有输出"而说 worth=true。** 大部分视频应该被你划走。
+
+# 各动作的克制程度（从松到紧）
+- like：看进去了就点，别吝啬。
+- favorite：只有"以后还想再看一遍"才收藏。
+- coin：**要花账号真硬币**，除非视频好到你想二刷，否则一律 false。
+- follow：只有你真心想追这个 UP 才 true，且必须说明理由。
+- comment：只在**真的有话说**时写。禁止"支持""不错""学习了""大佬牛"这类废话。
+  要么接一个具体的梗，要么指出视频里一个具体细节。写不出来就留空字符串。
+
+# 输出
+{_JSON_HINT}
+
+字段含义：
+- worth: 值不值得互动
+- reason: 一句话理由（会写进日志，要具体）
+- like / coin / favorite / follow: 布尔
+- comment: 评论正文，≤{max_len} 字，没有就填 ""
+"""
 
 
 def build_comment_prompt(

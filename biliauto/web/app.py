@@ -271,6 +271,63 @@ class CommentManager:
         return snap
 
 
+# ---------------------------------------------------------------- 自动逛 B 站
+class BrowseManager:
+    def __init__(self) -> None:
+        self.runner = None
+        self.store: Store | None = None
+
+    @property
+    def running(self) -> bool:
+        return self.runner is not None and self.runner.running
+
+    def _build(self, cfg: AppConfig):
+        from ..bili import build_credential
+        from ..browse import BrowseRunner
+
+        if self.store is None:
+            self.store = Store(cfg.data_dir / "biliauto.db")
+        return BrowseRunner(cfg, self.store, credential=build_credential(cfg.bili))
+
+    async def start(self, cfg: AppConfig) -> None:
+        if self.running:
+            raise RuntimeError("自动逛 B 站已在运行")
+        if not cfg.browse.zones and not cfg.browse.keywords:
+            raise RuntimeError("既没选分区也没填关键词，不知道逛哪儿")
+        self.runner = self._build(cfg)
+        self.runner.start()
+
+    async def stop(self) -> None:
+        if self.runner is not None:
+            await self.runner.stop()
+        self.runner = None
+
+    async def round_now(self, cfg: AppConfig) -> dict:
+        if self.runner is None:
+            self.runner = self._build(cfg)
+        result = await self.runner.round_once()
+        self.runner.rounds += 1
+        self.runner.last_round = result.as_dict()
+        self.runner.last_round_at = time.time()
+        return result.as_dict()
+
+    def snapshot(self) -> dict:
+        if self.runner is None:
+            cfg = AppConfig.load()
+            store = Store(cfg.data_dir / "biliauto.db")
+            try:
+                return {
+                    "running": False,
+                    **store.browse_stats(),
+                    "today": store.actions_today(),
+                }
+            finally:
+                store.close()
+        snap = self.runner.snapshot()
+        snap["running"] = self.running
+        return snap
+
+
 # ---------------------------------------------------------------- 应用
 def _settings_payload(cfg: AppConfig) -> dict:
     return {
@@ -315,6 +372,31 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "max_len": cfg.comments.max_len,
             "reply_probability": cfg.comments.reply_probability,
         },
+        "browse": {
+            "enabled": cfg.browse.enabled,
+            "interval": cfg.browse.interval,
+            "batch": cfg.browse.batch,
+            "max_llm": cfg.browse.max_llm,
+            "zones": list(cfg.browse.zones),
+            "keywords": list(cfg.browse.keywords),
+            "days": cfg.browse.days,
+            "order": cfg.browse.order,
+            "max_subtitle_chars": cfg.browse.max_subtitle_chars,
+            "favorite_folder": cfg.browse.favorite_folder,
+            "like": _action_dict(cfg.browse.like),
+            "coin": _action_dict(cfg.browse.coin),
+            "favorite": _action_dict(cfg.browse.favorite),
+            "follow": _action_dict(cfg.browse.follow),
+            "comment": _action_dict(cfg.browse.comment),
+        },
+    }
+
+
+def _action_dict(spec) -> dict:
+    return {
+        "enabled": spec.enabled,
+        "per_day": spec.per_day,
+        "probability": spec.probability,
     }
 
 
@@ -326,6 +408,7 @@ def create_app() -> FastAPI:
     logging.getLogger().addHandler(buffer)
     manager = BotManager()
     comment_mgr = CommentManager()
+    browse_mgr = BrowseManager()
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -344,6 +427,7 @@ def create_app() -> FastAPI:
             "room": room,
             "bot": manager.snapshot(),
             "comments": comment_mgr.snapshot(),
+            "browse": browse_mgr.snapshot(),
             "usage": usage,
             "llm": {"model": cfg.llm.model, "ok": cfg.llm.usable},
             "data_dir": str(cfg.data_dir),
@@ -579,6 +663,58 @@ def create_app() -> FastAPI:
         finally:
             store.close()
 
+    # ---------------- 自动逛 B 站 ----------------
+    @app.get("/api/browse/status")
+    async def browse_status() -> dict:
+        return browse_mgr.snapshot()
+
+    @app.post("/api/browse/start")
+    async def browse_start() -> dict:
+        cfg = AppConfig.load()
+        try:
+            await browse_mgr.start(cfg)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except Exception as e:
+            log.exception("自动逛启动失败")
+            raise HTTPException(status_code=500, detail=f"启动失败：{e}")
+        return {"ok": True, "browse": browse_mgr.snapshot()}
+
+    @app.post("/api/browse/stop")
+    async def browse_stop() -> dict:
+        await browse_mgr.stop()
+        return {"ok": True, "browse": browse_mgr.snapshot()}
+
+    @app.post("/api/browse/round")
+    async def browse_round() -> dict:
+        cfg = AppConfig.load()
+        if not cfg.browse.zones and not cfg.browse.keywords:
+            raise HTTPException(status_code=409, detail="既没选分区也没填关键词")
+        try:
+            result = await browse_mgr.round_now(cfg)
+        except Exception as e:
+            log.exception("逛一轮失败")
+            raise HTTPException(status_code=500, detail=f"失败：{e}")
+        return {"ok": True, "result": result, "browse": browse_mgr.snapshot()}
+
+    @app.get("/api/browse/actions")
+    async def browse_actions(limit: int = 30) -> dict:
+        cfg = AppConfig.load()
+        store = Store(cfg.data_dir / "biliauto.db")
+        try:
+            return {"items": store.recent_actions(limit)}
+        finally:
+            store.close()
+
+    @app.get("/api/browse/report")
+    async def browse_report() -> dict:
+        """今天的逛站报告（Markdown 原文）。"""
+        cfg = AppConfig.load()
+        path = cfg.data_dir / "reports" / f"browse-{time.strftime('%Y-%m-%d')}.md"
+        if not path.exists():
+            return {"exists": False, "content": ""}
+        return {"exists": True, "content": path.read_text(encoding="utf-8")}
+
     # ---------------- 观测 ----------------
     @app.get("/api/logs")
     async def logs(after: int = 0, limit: int = 200) -> dict:
@@ -609,6 +745,7 @@ def create_app() -> FastAPI:
     async def _shutdown() -> None:
         await manager.stop()
         await comment_mgr.stop()
+        await browse_mgr.stop()
 
     return app
 

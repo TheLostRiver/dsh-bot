@@ -71,6 +71,19 @@ async function refreshStatus() {
     $("st-sent").textContent = (s.usage && s.usage.danmaku_sent) || 0;
     $("st-uptime").textContent = fmtUptime(bot.uptime || 0);
 
+    // 概览页：今天的量
+    const br = s.browse || {};
+    const t = br.today || {};
+    $("ov-like").textContent = t.like || 0;
+    $("ov-fav").textContent = t.favorite || 0;
+    $("ov-comment").textContent = t.comment || 0;
+    $("ov-seen").textContent = br.seen || 0;
+    $("ov-actions").textContent = br.actions_ok || 0;
+    $("ov-creply").textContent = (s.comments && s.comments.replied) || 0;
+    $("ov-live-state").textContent = bot.running
+      ? `运行中 · 已回 ${bot.replied ?? 0}`
+      : "未启动";
+
     // 顶部横幅：把风险说清楚
     const banner = $("banner");
     const msgs = [];
@@ -185,8 +198,7 @@ async function loadSettings() {
     $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
 
-    if (s.comments) {
-      $("c-enabled").checked = !!s.comments.enabled;
+    if (s.comments) {      $("c-enabled").checked = !!s.comments.enabled;
       $("c-upmid").value = s.comments.up_mid;
       $("c-videos").value = s.comments.videos;
       $("c-interval").value = s.comments.poll_interval;
@@ -195,6 +207,24 @@ async function loadSettings() {
       $("c-gap").value = s.comments.min_interval;
       $("c-len").value = s.comments.max_len;
       $("c-prob").value = s.comments.reply_probability;
+    }
+
+    if (s.browse) {
+      $("b-keywords").value = (s.browse.keywords || []).join(",");
+      selectedZones = new Set(s.browse.zones || []);
+      buildZoneChips();
+      $("b-batch").value = s.browse.batch;
+      $("b-llm").value = s.browse.max_llm;
+      $("b-order").value = s.browse.order || "pubdate";
+      $("b-days").value = s.browse.days;
+      $("b-interval").value = s.browse.interval;
+      $("b-folder").value = s.browse.favorite_folder || "";
+      for (const [key, prefix] of ACTIONS) {
+        const spec = s.browse[key] || {};
+        $(`${prefix}-enabled`).checked = !!spec.enabled;
+        $(`${prefix}-day`).value = spec.per_day ?? 0;
+        $(`${prefix}-prob`).value = spec.probability ?? 0;
+      }
     }
 
     settingsLoaded = true;
@@ -208,7 +238,7 @@ function collectSettings() {
     const v = parseFloat($(id).value);
     return Number.isFinite(v) ? v : d;
   };
-  return {
+  const out = {
     room_id: Math.max(0, Math.trunc(num("s-room"))),
     dry_run: $("s-dryrun").checked,
     persona: {
@@ -251,7 +281,27 @@ function collectSettings() {
       max_len: Math.trunc(num("c-len", 60)),
       reply_probability: num("c-prob", 0.5),
     },
+    browse: {
+      interval: num("b-interval", 1800),
+      batch: Math.trunc(num("b-batch", 6)),
+      max_llm: Math.trunc(num("b-llm", 3)),
+      zones: Array.from(selectedZones),
+      keywords: $("b-keywords").value.split(",").map((x) => x.trim()).filter(Boolean),
+      days: Math.trunc(num("b-days", 7)),
+      order: $("b-order").value,
+      max_subtitle_chars: 6000,
+      favorite_folder: $("b-folder").value.trim() || "AI 精选",
+    },
   };
+
+  for (const [key, prefix] of ACTIONS) {
+    out.browse[key] = {
+      enabled: $(`${prefix}-enabled`).checked,
+      per_day: Math.trunc(num(`${prefix}-day`, 0)),
+      probability: num(`${prefix}-prob`, 0),
+    };
+  }
+  return out;
 }
 
 async function saveSettings() {
@@ -567,6 +617,175 @@ async function refreshCommentReplies() {
   } catch { /* 忽略 */ }
 }
 
+/* ---------------------------------------------------------------- 路由 */
+const ROUTES = {
+  overview: "概览",
+  live: "直播互动",
+  comments: "评论区",
+  browse: "自动逛 B 站",
+  persona: "人设",
+  settings: "设置",
+  logs: "日志",
+};
+
+function currentRoute() {
+  const h = (location.hash || "").replace(/^#\/?/, "");
+  return ROUTES[h] ? h : "overview";
+}
+
+function applyRoute() {
+  const r = currentRoute();
+  document.querySelectorAll(".nav a").forEach((a) =>
+    a.classList.toggle("active", a.dataset.route === r)
+  );
+  document.querySelectorAll(".page").forEach((p) =>
+    p.classList.toggle("active", p.dataset.page === r)
+  );
+  $("page-title").textContent = ROUTES[r];
+  // 概览和日志没有可编辑项，藏掉保存栏
+  $("savebar").classList.toggle("hidden", r === "logs" || r === "overview");
+
+  if (r === "browse") {
+    refreshBrowse();
+    refreshBrowseActions();
+    refreshBrowseReport();
+  }
+  if (r === "logs") refreshLogs();
+}
+
+/* ---------------------------------------------------------------- 自动逛 B 站 */
+const ZONE_LIST = [
+  ["Game", "游戏"], ["Knowledge", "知识"], ["Technology", "科技"],
+  ["Douga", "动画"], ["Kichiku", "鬼畜"], ["Music", "音乐"],
+  ["Dance", "舞蹈"], ["Life", "生活"], ["Food", "美食"],
+  ["Ent", "娱乐"], ["Cinephile", "影视"], ["Car", "汽车"],
+  ["Sports", "运动"], ["Animal", "动物"], ["Documentary", "纪录片"],
+];
+
+const ACTIONS = [
+  ["like", "b-like"],
+  ["favorite", "b-fav"],
+  ["coin", "b-coin"],
+  ["follow", "b-follow"],
+  ["comment", "b-comment"],
+];
+
+let selectedZones = new Set();
+let browseRunning = false;
+
+function buildZoneChips() {
+  const box = $("b-zones");
+  box.innerHTML = "";
+  for (const [name, label] of ZONE_LIST) {
+    const el = document.createElement("span");
+    el.className = "chip" + (selectedZones.has(name) ? " on" : "");
+    el.textContent = label;
+    el.addEventListener("click", () => {
+      if (selectedZones.has(name)) selectedZones.delete(name);
+      else selectedZones.add(name);
+      el.classList.toggle("on");
+    });
+    box.appendChild(el);
+  }
+}
+
+async function refreshBrowse() {
+  try {
+    const b = await api("/api/browse/status");
+    browseRunning = !!b.running;
+    const btn = $("btn-browse-toggle");
+    btn.textContent = browseRunning ? "停止" : "启动";
+    btn.classList.toggle("primary", !browseRunning);
+    btn.classList.toggle("danger", browseRunning);
+
+    const t = b.today || {};
+    const bits = [browseRunning ? "逛站中" : "未启动"];
+    if (b.rounds) bits.push(`已逛 ${b.rounds} 轮`);
+    if (b.seen) bits.push(`看过 ${b.seen} 条`);
+    const acts = Object.entries(t).map(([k, v]) => `${k} ${v}`).join(" · ");
+    if (acts) bits.push(acts);
+    $("b-stats").textContent = bits.join(" · ");
+
+    $("ov-like").textContent = t.like || 0;
+    $("ov-fav").textContent = t.favorite || 0;
+    $("ov-comment").textContent = t.comment || 0;
+    $("ov-seen").textContent = b.seen || 0;
+    $("ov-actions").textContent = b.actions_ok || 0;
+  } catch { /* 忽略 */ }
+}
+
+async function toggleBrowse() {
+  const btn = $("btn-browse-toggle");
+  btn.disabled = true;
+  try {
+    if (browseRunning) {
+      await api("/api/browse/stop", { method: "POST" });
+      toast("已停止逛站");
+    } else {
+      await api("/api/browse/start", { method: "POST" });
+      toast("已开始逛站");
+    }
+    await refreshBrowse();
+  } catch (e) {
+    toast("操作失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runBrowseRound() {
+  const btn = $("btn-browse-round");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "逛站中…";
+  try {
+    const r = await api("/api/browse/round", { method: "POST" });
+    const x = r.result || {};
+    if (x.error) toast("出错：" + x.error);
+    else toast(`找到 ${x.found} 条 / 新 ${x.fresh} / 判断 ${x.judged} / 值得 ${x.worth} / 动作 ${(x.actions || []).length}`);
+    await refreshBrowse();
+    await refreshBrowseActions();
+    await refreshBrowseReport();
+  } catch (e) {
+    toast("失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function refreshBrowseActions() {
+  try {
+    const r = await api("/api/browse/actions?limit=20");
+    const box = $("browse-actions");
+    if (!r.items || !r.items.length) return;
+    box.innerHTML = "";
+    const NAMES = { like: "点赞", favorite: "收藏", coin: "投币", follow: "关注", comment: "评论" };
+    for (const it of r.items) {
+      const div = document.createElement("div");
+      div.className = "reply " + (it.ok ? "ok" : "fail");
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent =
+        `${new Date(it.ts * 1000).toLocaleTimeString()} · ${NAMES[it.action] || it.action}` +
+        (it.title ? ` · ${String(it.title).slice(0, 26)}` : "");
+      div.appendChild(who);
+      const out = document.createElement("div");
+      out.className = "out";
+      out.textContent = it.ok ? "✅ 已执行" : `❌ ${it.error || "未执行"}`;
+      div.appendChild(out);
+      box.appendChild(div);
+    }
+  } catch { /* 忽略 */ }
+}
+
+async function refreshBrowseReport() {
+  try {
+    const r = await api("/api/browse/report");
+    $("browse-report").textContent = r.exists ? r.content : "今天还没有逛站记录。";
+  } catch { /* 忽略 */ }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -608,6 +827,8 @@ function bind() {
   });
 
   $("btn-toggle").addEventListener("click", toggleBot);
+  $("btn-browse-toggle").addEventListener("click", toggleBrowse);
+  $("btn-browse-round").addEventListener("click", runBrowseRound);
   $("btn-comment-toggle").addEventListener("click", toggleComments);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);
@@ -654,11 +875,13 @@ function bind() {
   await loadSettings();
   await loadVoices();
   await refreshStatus();
+  applyRoute();
   refreshLogs();
   refreshReplies();
   refreshComments();
   refreshCommentReplies();
 
+  window.addEventListener("hashchange", applyRoute);
   statusTimer = setInterval(refreshStatus, 3000);
   setInterval(refreshLogs, 2000);
   setInterval(refreshReplies, 8000);
