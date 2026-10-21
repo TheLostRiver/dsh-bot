@@ -358,6 +358,58 @@ def create_app() -> FastAPI:
         """改 dry_run 需要重启才生效，这里只做提示。"""
         return {"ok": True, "restart_required": manager.running}
 
+    # ---------------- 人设预览 ----------------
+    @app.post("/api/persona/preview")
+    async def persona_preview(payload: dict) -> dict:
+        """用前端表单里（可能还没保存）的人设，真跑一次决策看效果。"""
+        cfg = AppConfig.load()
+        if not cfg.llm.usable:
+            raise HTTPException(status_code=400, detail="未配置 DEEPSEEK_API_KEY，无法预览")
+
+        text = str(payload.get("text") or "").strip() or "主播今天播到几点啊？"
+        text = text[:120]
+
+        p = payload.get("persona") or {}
+        aliases = p.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [x.strip() for x in aliases.split(",") if x.strip()]
+
+        persona = replace(
+            cfg.persona,
+            name=str(p.get("name") or cfg.persona.name),
+            bio=str(p.get("bio") or cfg.persona.bio),
+            style=str(p.get("style") or cfg.persona.style),
+            catchphrase=str(p.get("catchphrase") or ""),
+            aliases=tuple(str(a) for a in aliases),
+        )
+
+        from ..llm import Brain, build_system_prompt
+
+        system = build_system_prompt(persona, cfg.guard.max_danmaku_len)
+        user = (
+            "【直播间最近】\n（刚开播，人不多）\n\n"
+            f"【现在】观众「小明」说：{text}\n\n"
+            "【背景】这是人设试说，正常接话即可。"
+        )
+
+        started = time.time()
+        reply = await Brain(cfg.llm).decide(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            cfg.guard.max_danmaku_len,
+        )
+        return {
+            "input": text,
+            "should_reply": reply.should_reply,
+            "danmaku": reply.danmaku,
+            "speech": reply.speech,
+            "mood": reply.mood,
+            "elapsed_ms": int((time.time() - started) * 1000),
+            "model": cfg.llm.model,
+        }
+
     # ---------------- 语音 ----------------
     @app.get("/api/voices")
     async def voices() -> dict:

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-bot · 直播互动后台</title>
-<link rel="stylesheet" href="/static/style.css?v=4" />
+<link rel="stylesheet" href="/static/style.css?v=5" />
 </head>
 <body>
 
@@ -63,7 +63,10 @@
     <div class="card wide">
       <div class="card-head">
         <h2>人设</h2>
-        <span class="hint tiny">决定它说话像谁 —— 改完点保存</span>
+        <div class="head-actions">
+          <span class="hint tiny">决定它说话像谁</span>
+          <button class="btn ghost sm" id="btn-preview-persona" type="button">预览效果</button>
+        </div>
       </div>
       <div class="form-grid">
         <label>角色名<input id="p-name" type="text" /></label>
@@ -170,8 +173,26 @@
   </div>
 </main>
 
+<div id="persona-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>人设预览</h3>
+      <button class="btn ghost sm" id="btn-pv-close" type="button">关闭</button>
+    </div>
+    <p class="hint">用表单里<b>当前的人设</b>（还没保存也生效）真跑一次决策，看看像不像。每次试说会消耗一次模型调用。</p>
+    <label class="pv-input-label">模拟一条观众弹幕
+      <textarea id="pv-text" rows="2" placeholder="主播今天播到几点啊？"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button class="btn primary" id="btn-pv-run" type="button">试说（Ctrl+Enter）</button>
+      <button class="btn ghost" id="btn-pv-clear" type="button">清空结果</button>
+    </div>
+    <div id="pv-results" class="pv-results"></div>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden"></div>
 
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

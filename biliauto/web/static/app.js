@@ -386,6 +386,73 @@ async function previewVoice() {
   }
 }
 
+/* ---------------------------------------------------------------- 人设预览 */
+function openPersonaModal() {
+  $("persona-modal").classList.remove("hidden");
+  const t = $("pv-text");
+  if (!t.value.trim()) t.value = "主播今天播到几点啊？";
+  t.focus();
+  t.select();
+}
+
+function closePersonaModal() {
+  $("persona-modal").classList.add("hidden");
+}
+
+function addPreviewCard(r) {
+  const box = $("pv-results");
+  const card = document.createElement("div");
+  card.className = "pv-item" + (r.should_reply ? "" : " skip");
+
+  const q = document.createElement("div");
+  q.className = "pv-q";
+  q.textContent = `观众：${r.input}`;
+
+  const a = document.createElement("div");
+  a.className = "pv-a";
+  a.textContent = r.should_reply ? `弹幕 → ${r.danmaku}` : "（选择沉默，不回这条）";
+  card.append(q, a);
+
+  if (r.should_reply && r.speech) {
+    const s = document.createElement("div");
+    s.className = "pv-s";
+    s.textContent = `语音 → ${r.speech}`;
+    card.appendChild(s);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "pv-meta";
+  meta.textContent = `${r.elapsed_ms}ms · ${r.model} · ${r.mood}`;
+  card.appendChild(meta);
+
+  box.prepend(card);
+  while (box.childElementCount > 6) box.removeChild(box.lastChild);
+}
+
+async function runPersonaPreview() {
+  const btn = $("btn-pv-run");
+  const text = $("pv-text").value.trim();
+  btn.disabled = true;
+  btn.textContent = "生成中…";
+  try {
+    const settings = collectSettings();
+    const r = await api("/api/persona/preview", {
+      method: "POST",
+      body: JSON.stringify({ text, persona: settings.persona }),
+    });
+    addPreviewCard(r);
+  } catch (e) {
+    const box = $("pv-results");
+    const div = document.createElement("div");
+    div.className = "pv-item bad";
+    div.textContent = "试说失败：" + e.message;
+    box.prepend(div);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "试说（Ctrl+Enter）";
+  }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -429,6 +496,25 @@ function bind() {
   $("btn-toggle").addEventListener("click", toggleBot);
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-preview").addEventListener("click", previewVoice);
+
+  $("btn-preview-persona").addEventListener("click", openPersonaModal);
+  $("btn-pv-close").addEventListener("click", closePersonaModal);
+  $("btn-pv-run").addEventListener("click", runPersonaPreview);
+  $("btn-pv-clear").addEventListener("click", () => { $("pv-results").innerHTML = ""; });
+  $("persona-modal").addEventListener("click", (e) => {
+    if (e.target.id === "persona-modal") closePersonaModal();
+  });
+  $("pv-text").addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      runPersonaPreview();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("persona-modal").classList.contains("hidden")) {
+      closePersonaModal();
+    }
+  });
   $("v-voice-custom").addEventListener("input", (e) => {
     // 一旦填了自定义 ID，就把上面的选择清掉，避免两个值打架
     if (e.target.value.trim()) $("v-voice").selectedIndex = -1;

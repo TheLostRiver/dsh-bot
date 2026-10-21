@@ -171,6 +171,40 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-si
 }
 .hidden { display: none !important; }
 
+/* ---------- 人设预览弹窗 ---------- */
+.head-actions { display: flex; align-items: center; gap: 10px; }
+
+.modal {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,.62); backdrop-filter: blur(3px);
+  display: grid; place-items: center; padding: 24px;
+}
+.modal-box {
+  width: min(660px, 100%); max-height: 86vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 18px 20px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.modal-head h3 { margin: 0; font-size: 15px; }
+.pv-input-label { margin-top: 12px; }
+.modal-actions { display: flex; gap: 10px; margin: 12px 0; }
+.pv-results { display: flex; flex-direction: column; gap: 10px; }
+.pv-item {
+  background: var(--panel-2); border-radius: 10px; padding: 11px 14px;
+  border-left: 3px solid var(--ok);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.pv-item.skip { border-left-color: var(--warn); }
+.pv-item.bad { border-left-color: var(--bad); color: #f0a3a6; }
+.pv-q { color: var(--dim); font-size: 12px; }
+.pv-a { font-size: 14px; }
+.pv-s { font-size: 13px; color: #9fb4d6; }
+.pv-meta { font-size: 11px; color: #5a6272; }
+
 @media (max-width: 860px) {
   .grid { grid-template-columns: 1fr; }
   .login-body { flex-direction: column; }
