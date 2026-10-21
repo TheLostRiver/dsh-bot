@@ -625,6 +625,43 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "max-age=600"},
         )
 
+    # ---------------- 语音播报开关 ----------------
+    @app.post("/api/speech/toggle")
+    async def speech_toggle(payload: dict | None = None) -> dict:
+        """一个开关：立刻生效 + 落盘，不用重启机器人。"""
+        cfg = AppConfig.load()
+        enabled = None
+        if payload and "enabled" in payload:
+            enabled = bool(payload["enabled"])
+        else:
+            enabled = not cfg.speech.enabled
+
+        settings = vault.load_settings(cfg.data_dir)
+        speech = settings.get("speech")
+        if not isinstance(speech, dict):
+            speech = {}
+            settings["speech"] = speech
+        speech["enabled"] = enabled
+        vault.save_settings(cfg.data_dir, settings)
+
+        applied = False
+        bot = manager.bot
+        if bot is not None:
+            bot.set_speech(enabled)
+            applied = True
+        return {"ok": True, "enabled": enabled, "applied": applied}
+
+    @app.get("/api/speech/state")
+    async def speech_state() -> dict:
+        cfg = AppConfig.load()
+        bot = manager.bot
+        return {
+            "enabled": bool(bot.speech_enabled) if bot is not None else cfg.speech.enabled,
+            "running": manager.running,
+            "backend": cfg.speech.backend,
+            "voice": cfg.speech.voice,
+        }
+
     # ---------------- 评论区值班 ----------------
     @app.get("/api/comments/status")
     async def comments_status() -> dict:

@@ -65,11 +65,15 @@ class LiveBot:
             )
         self.sender = sender
 
-        if speaker is None and cfg.speech.enabled:
+        if speaker is None:
+            # 即使当前是关的也建一个，这样页面上那个开关能即时生效
             from ..bili.actions import Speaker
 
             speaker = Speaker(cfg.speech)
+        # 语音是否生效做成运行时开关：关掉时也保留 Speaker，随时能再开
+        self.speech_enabled = cfg.speech.enabled and speaker is not None
         self.speaker = speaker
+        self._speech_tasks: set[asyncio.Task] = set()
 
         self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=50)
         self._seq = itertools.count()
@@ -190,10 +194,27 @@ class LiveBot:
         self.store.mark_replied(event.uid)
         self.store.touch_viewer(event.uid, event.uname)
 
-        if self.speaker is not None and reply.speech:
-            path = await self.speaker.say(reply.speech)
+        if self.speech_enabled and self.speaker is not None and reply.speech:
+            # 语音合成要 1.4 秒左右，不能堵住决策循环：
+            # 丢到后台任务，合成完自然进播放队列
+            task = asyncio.create_task(self._speak(reply.speech))
+            self._speech_tasks.add(task)
+            task.add_done_callback(self._speech_tasks.discard)
+
+    async def _speak(self, text: str) -> None:
+        try:
+            path = await self.speaker.say(text)
             if path:
                 self.store.incr_usage("speech_made")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("语音播报失败：%s", e)
+
+    def set_speech(self, enabled: bool) -> None:
+        """运行时开关语音，不需要重启机器人。"""
+        self.speech_enabled = bool(enabled) and self.speaker is not None
+        log.info("语音播报已%s", "开启" if self.speech_enabled else "关闭")
 
     def _polish(self, text: str) -> str:
         """提示词管不住的时候，最后一道确定性去重：连续重复的口头禅直接摘掉。"""
@@ -284,6 +305,10 @@ class LiveBot:
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            for t in list(self._speech_tasks):
+                t.cancel()
+            if self._speech_tasks:
+                await asyncio.gather(*self._speech_tasks, return_exceptions=True)
             if self.speaker is not None:
                 await self.speaker.close()
             log.info(

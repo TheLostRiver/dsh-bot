@@ -668,6 +668,7 @@ function applyRoute() {
     refreshBrowseReport();
   }
   if (r === "history") loadHistory(true);
+  if (r === "live") refreshSpeechState();
   if (r === "logs") refreshLogs();
 }
 
@@ -1147,6 +1148,38 @@ function bindChipGroup(id, onPick) {
   });
 }
 
+/* ---------------------------------------------------------------- 语音开关 */
+async function refreshSpeechState() {
+  try {
+    const s = await api("/api/speech/state");
+    const sw = $("switch-speech");
+    sw.setAttribute("aria-checked", s.enabled ? "true" : "false");
+    $("speech-state").textContent =
+      `${s.enabled ? "已开启" : "已关闭"} · ${s.backend} · ${s.voice}` +
+      (s.running ? "" : " · 机器人未启动");
+    if ($("v-enabled")) $("v-enabled").checked = !!s.enabled;
+  } catch { /* 忽略 */ }
+}
+
+async function toggleSpeech() {
+  const sw = $("switch-speech");
+  const next = sw.getAttribute("aria-checked") !== "true";
+  sw.disabled = true;
+  try {
+    const r = await api("/api/speech/toggle", {
+      method: "POST",
+      body: JSON.stringify({ enabled: next }),
+    });
+    sw.setAttribute("aria-checked", r.enabled ? "true" : "false");
+    toast(r.enabled ? "语音播报已开启" : "语音播报已关闭");
+    await refreshSpeechState();
+  } catch (e) {
+    toast("切换失败：" + e.message);
+  } finally {
+    sw.disabled = false;
+  }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -1216,6 +1249,7 @@ function bind() {
   $("btn-h-more").addEventListener("click", () => loadHistory(false));
 
   $("btn-comment-toggle").addEventListener("click", toggleComments);
+  $("switch-speech").addEventListener("click", toggleSpeech);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);
   $("btn-preview").addEventListener("click", previewVoice);
