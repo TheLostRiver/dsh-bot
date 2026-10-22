@@ -159,6 +159,10 @@ class BotManager:
             "considered": getattr(bot, "considered", 0),
             "queued": bot._queue.qsize() if bot is not None else 0,
             "error": self.error,
+            # 连续发不出弹幕时会被熔断，这里告诉前端原因
+            "send_disabled": (
+                getattr(getattr(bot, "sender", None), "disabled", "") or ""
+            ),
         }
 
 

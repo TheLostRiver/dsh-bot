@@ -1130,6 +1130,45 @@ def test_settings_merge() -> None:
     check("不改动原对象", base["speech"]["backend"] == "play")
 
 
+def test_send_breaker() -> None:
+    """连续发不出去就熔断：别再打接口，节奏回到正常间隔。"""
+    print("\n[发送熔断]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    from biliauto.bili.actions import DanmakuSender
+    from biliauto.config import AppConfig
+    from biliauto.live.guard import DanmakuBudget
+
+    cfg = AppConfig.load()
+    st = Store(Path(tempfile.mkdtemp()) / "br.db")
+    budget = DanmakuBudget(replace(cfg.guard, min_interval=12), st, dry_run=False)
+    calls = {"n": 0}
+
+    class AlwaysFail:
+        async def send_danmaku(self, d, reply_mid=None):
+            calls["n"] += 1
+            raise RuntimeError("1001 需要绑定手机号")
+
+    sender = DanmakuSender(AlwaysFail(), cfg.guard, budget, st, dry_run=False)
+
+    async def go():
+        out = []
+        for i in range(5):
+            budget._last_sent = 0          # 模拟冷却已过
+            ok, why = await sender.send(f"第{i}条")
+            out.append((calls["n"], bool(sender.disabled), budget.evaluate(1)[1], why))
+        return out
+
+    rows = _asyncio.run(go())
+    check("前三次真的调了接口", [r[0] for r in rows[:3]] == [1, 2, 3])
+    check("第三次后熔断", rows[2][1] is True)
+    check("熔断后不再调接口", rows[3][0] == 3 and rows[4][0] == 3)
+    check("熔断后节奏回到 12 秒", rows[4][2] <= 13, str(rows[4][2]))
+    check("熔断后返回 disabled", rows[4][3].startswith("disabled:"), rows[4][3])
+    st.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -1161,6 +1200,7 @@ def main() -> int:
                test_offline_and_comment_fixes, test_live_lifecycle, test_instance_lock,
                test_comment_retry, test_pagination_bounds, test_tts_cleanup,
                test_speak_on_failure, test_system_audio, test_settings_merge,
+               test_send_breaker,
                test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")

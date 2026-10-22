@@ -141,6 +141,14 @@ class DanmakuBudget:
         self._day_used += 1
         self._day_used_at = now
 
+    def note_spoken(self, now: float | None = None) -> None:
+        """只是念了一句、并没有真的发弹幕时的节流。
+
+        不消耗任何发送配额：账号被限制、只出声的场景下，
+        应该按正常间隔（min_interval）排，而不是被当成"又发了一条"。
+        """
+        self._last_sent = now or time.time()
+
     def note_failed(self, now: float | None = None) -> None:
         """发送被风控拒绝时，拉长冷却，让账号缓一缓。"""
         self._last_sent = (now or time.time()) + self.cfg.min_interval * 3

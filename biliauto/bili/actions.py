@@ -37,6 +37,18 @@ class DanmakuSender:
         self.budget = budget
         self.store = store
         self.dry_run = dry_run
+        self._fails = 0
+        self.disabled = ""
+
+    def _count_fail(self, why: str) -> None:
+        self._fails += 1
+        if self._fails >= self.HARD_FAIL_LIMIT and not self.disabled:
+            self.disabled = why[:80]
+            log.error(
+                "连续 %s 次发不出弹幕（%s），本场不再尝试；语音播报不受影响",
+                self._fails,
+                why[:60],
+            )
 
     def clamp(self, text: str) -> str:
         text = " ".join((text or "").split())
@@ -44,10 +56,18 @@ class DanmakuSender:
             text = text[: self.guard.max_danmaku_len]
         return text
 
+    #: 连续失败这么多次就认定"这个账号本场发不了"，停止尝试
+    HARD_FAIL_LIMIT = 3
+
     async def send(self, text: str, reply_mid: int | None = None) -> tuple[bool, str]:
         text = self.clamp(text)
         if not text:
             return False, "empty"
+
+        if self.disabled:
+            # 已经确定发不出去：不再打接口，但节奏照常，语音还能继续出
+            self.budget.note_spoken()
+            return False, f"disabled:{self.disabled}"
 
         ok, reason = self.budget.check(reply_mid or 0)
         if not ok:
@@ -68,6 +88,7 @@ class DanmakuSender:
 
             code, msg = error_of(e)
             self.budget.note_failed()
+            self._count_fail(msg)
             if is_risk(code):
                 log.warning("发弹幕触发风控（%s），冷却拉长", code)
             else:
@@ -79,10 +100,12 @@ class DanmakuSender:
         if ok2:
             self.budget.note_sent(reply_mid or 0)
             self.store.incr_usage("danmaku_sent")
+            self._fails = 0
             log.info("已发送弹幕：%s", text)
             return True, "ok"
 
         self.budget.note_failed()
+        self._count_fail(detail)
         log.warning("发弹幕被拒 %s", detail)
         return False, detail
 

@@ -494,6 +494,7 @@ REPLY_PROBABILITY=0.12   # 普通闲聊被抽中的概率
 | 语音听不到 | OBS 没采到 CABLE Output | 检查 OBS 音频输入设备 |
 | DeepSeek 报 401 | key 错 | 检查 `DEEPSEEK_API_KEY` |
 | **同一条弹幕被回好几次、语音重复播报** | **同时开了多个机器人** | 见下面「单实例锁」 |
+| 语音一直不播、事件全被 skip | 发弹幕连续失败把冷却推到 48 秒 | 已修：连续 3 次失败会熔断，节奏回到 12 秒 |
 | `1001` 需要绑定手机号 | 账号未实名 | 去 B 站绑定手机号后才能发弹幕 |
 
 ### 单实例锁：为什么会有"重复回复"
@@ -566,7 +567,7 @@ scripts/
   check_env.py       环境自检
   replay.py          离线回放（不连 B 站）
 tests/
-  test_core.py       166 项断言，python tests/test_core.py
+  test_core.py       171 项断言，python tests/test_core.py
 ```
 
 **改动建议**：想改性格就只动 `llm.py` 里的 `build_system_prompt`（或直接用后台的人设表单）；
