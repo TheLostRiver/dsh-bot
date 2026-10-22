@@ -532,7 +532,7 @@ scripts/
   check_env.py       环境自检
   replay.py          离线回放（不连 B 站）
 tests/
-  test_core.py       136 项断言，python tests/test_core.py
+  test_core.py       142 项断言，python tests/test_core.py
 ```
 
 **改动建议**：想改性格就只动 `llm.py` 里的 `build_system_prompt`（或直接用后台的人设表单）；

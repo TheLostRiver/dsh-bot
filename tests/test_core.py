@@ -255,7 +255,12 @@ def test_comments() -> None:
     # 去重与记录
     check("未见过", s.seen_comment(12345) is False)
     s.record_comment(12345, 1, 2, "乙", "好看", time.time(), "considered", "question")
-    check("记录后算见过", s.seen_comment(12345) is True)
+    check("待定状态不算见过（还能再处理）", s.seen_comment(12345) is False)
+    s.set_comment_action(12345, "deferred", "cooldown")
+    check("顺延状态也不算见过", s.seen_comment(12345) is False)
+    s.set_comment_action(12345, "ignored", "model_declined")
+    check("终态才算见过", s.seen_comment(12345) is True)
+    s.record_comment(12345, 1, 2, "乙", "好看", time.time(), "replied", "ok")
     s.log_comment_reply(12345, 1, 2, "好看", "确实好看", True)
     stats = s.comment_stats()
     check("评论回复统计", stats["replied"] == 1 and stats["seen"] == 1, str(stats))
@@ -878,6 +883,69 @@ def test_live_lifecycle() -> None:
     store2.close()
 
 
+def test_comment_retry() -> None:
+    """被配额挤掉的评论不能永久失效。"""
+    print("\n[评论顺延]")
+    import asyncio as _asyncio
+    import time as _t
+    from dataclasses import replace
+
+    from biliauto.comments.collector import CommentEvent, VideoRef
+    from biliauto.comments.duty import CommentDuty
+    from biliauto.config import AppConfig
+    from biliauto.llm import Reply
+
+    cfg = AppConfig.load()
+    cc = replace(cfg.comments, max_per_day=100, min_interval=3600,
+                 lookback_hours=72, reply_probability=1.0)
+    store = Store(Path(tempfile.mkdtemp()) / "retry.db")
+    duty = CommentDuty(replace(cfg, dry_run=True, comments=cc), store, credential=object())
+
+    class FakeCollector:
+        async def resolve_anchor(self, r):
+            return 111, "主播"
+
+        async def videos(self, mid, limit=5):
+            return [VideoRef(aid=1, bvid="BV1", title="测试视频")]
+
+        async def comments(self, v, page=1):
+            return [
+                CommentEvent(rpid=100 + i, oid=1, uid=200 + i, uname=f"观众{i}",
+                             text=f"这期讲得真好，第{i}个问题怎么看？",
+                             ctime=_t.time() - 60, is_top_level=True, reply_count=0,
+                             video_title="测试视频")
+                for i in range(3)
+            ]
+
+    duty.collector = FakeCollector()
+
+    class FakeBrain:
+        online = True
+
+        async def decide(self, m, n):
+            return Reply(True, "谢谢支持", "谢谢支持")
+
+    duty.brain = FakeBrain()
+
+    r1 = _asyncio.run(duty._do_scan())
+    check("一轮只能回一条", r1.replied == 1 and r1.candidates == 3, str(r1.as_dict()))
+
+    actions = {r[0]: r[1] for r in store._conn.execute(
+        "SELECT rpid, action FROM comments_seen")}
+    check("没轮到的标记为 deferred",
+          list(actions.values()).count("deferred") == 2, str(actions))
+
+    duty.budget._last = 0
+    r2 = _asyncio.run(duty._do_scan())
+    check("顺延的评论下一轮会被重新捡起", r2.candidates == 2, str(r2.as_dict()))
+
+    replied = [r[0] for r in store._conn.execute(
+        "SELECT rpid FROM comment_replies WHERE ok=1")]
+    check("同一条评论不会被回复两次", len(replied) == len(set(replied)) == 2,
+          str(replied))
+    store.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -907,6 +975,7 @@ def main() -> int:
                test_browse_rebuild, test_browse_fixes, test_mixer,
                test_diagnose, test_live_fixes,
                test_offline_and_comment_fixes, test_live_lifecycle,
+               test_comment_retry,
                test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")

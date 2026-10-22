@@ -328,12 +328,16 @@ class Store:
         return {c: row[c] for c in USAGE_COLUMNS}
 
     # ---------- 评论区 ----------
+    #: 只有这些结论才算"处理完了"。considered/deferred 是待定状态，
+    #: 下一轮扫描还要再看一次，否则被配额挤掉的评论就永久丢了。
+    COMMENT_TERMINAL = ("replied", "ignored", "failed")
+
     def seen_comment(self, rpid: int) -> bool:
         with self._lock:
             row = self._conn.execute(
-                "SELECT 1 FROM comments_seen WHERE rpid=?", (rpid,)
+                "SELECT action FROM comments_seen WHERE rpid=?", (rpid,)
             ).fetchone()
-        return row is not None
+        return bool(row) and row["action"] in self.COMMENT_TERMINAL
 
     def record_comment(
         self,

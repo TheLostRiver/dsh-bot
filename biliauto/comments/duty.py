@@ -286,8 +286,10 @@ class CommentDuty:
                 break
             ok, wait, why = self.budget.can_send()
             if not ok:
-                log.debug("评论区跳过（%s）", why)
-                self.store.set_comment_action(c.rpid, "skipped", why)
+                # 不是不回了，是这会儿不能回：留成待定，下一轮还能捡回来
+                log.debug("评论区顺延（%s）", why)
+                self.store.set_comment_action(c.rpid, "deferred", why)
+                r.skipped += 1
                 continue
 
             decisions += 1
