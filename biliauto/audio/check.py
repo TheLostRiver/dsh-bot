@@ -225,7 +225,18 @@ def diagnose(
 
     if out_dev is None:
         # 播到系统默认
-        if is_virtual(default_output):
+        if getattr(speech, "system_audio", False):
+            d.findings.append(
+                Finding(
+                    "ok",
+                    "播放到系统默认设备，且已声明开启系统声音采集",
+                    f"默认输出：{default_output}。直播软件会把这路声音一起收进去。",
+                    "确认直播姬里「系统声音」是开着的即可。",
+                    "play_system_audio",
+                )
+            )
+            d.reachable = True
+        elif is_virtual(default_output):
             d.findings.append(
                 Finding(
                     "ok",

@@ -390,6 +390,8 @@ def _settings_payload(cfg: AppConfig) -> dict:
             "mix_mic_gain": cfg.speech.mix_mic_gain,
             "mix_tts_gain": cfg.speech.mix_tts_gain,
             "mix_duck": cfg.speech.mix_duck,
+            "when_failed": cfg.speech.when_failed,
+            "system_audio": cfg.speech.system_audio,
         },
         "comments": {
             "enabled": cfg.comments.enabled,
@@ -433,6 +435,17 @@ def _action_dict(spec) -> dict:
         "per_day": spec.per_day,
         "probability": spec.probability,
     }
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    """把 patch 合进 base（嵌套 dict 递归合并），返回新对象。"""
+    out = dict(base or {})
+    for key, val in (patch or {}).items():
+        if isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], val)
+        else:
+            out[key] = val
+    return out
 
 
 def create_app() -> FastAPI:
@@ -519,7 +532,9 @@ def create_app() -> FastAPI:
                 detail="人设名字不能为空。如果页面刚打开就报这个错，刷新一下再试。",
             )
         cfg = AppConfig.load()
-        vault.save_settings(cfg.data_dir, payload)
+        # 深合并而不是整体覆盖：只发部分字段时不能把其他已保存的配置冲掉
+        merged = _deep_merge(vault.load_settings(cfg.data_dir), payload)
+        vault.save_settings(cfg.data_dir, merged)
         return {"ok": True, "restart_required": manager.running}
 
     # ---------------- 机器人 ----------------

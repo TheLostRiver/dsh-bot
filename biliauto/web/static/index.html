@@ -139,6 +139,14 @@
           <label class="full">播放设备（仅 play 模式，可精确播到虚拟声卡）
             <select id="v-device"><option value="">系统默认</option></select>
           </label>
+          <label class="check full">
+            <input id="v-sysaudio" type="checkbox" />
+            <span>直播软件已开启「系统声音采集」（选系统默认输出时必须勾上，否则观众听不到）</span>
+          </label>
+          <label class="check full">
+            <input id="v-whenfailed" type="checkbox" />
+            <span>弹幕发不出去时也照样播报（账号被限制时至少还有声音）</span>
+          </label>
           <label class="full">音色
             <select id="v-voice"></select>
           </label>
@@ -461,6 +469,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=15"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>

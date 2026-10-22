@@ -213,16 +213,23 @@ class LiveBot:
         )
         self.store.set_event_decision(event_id, "replied" if sent else "failed", why)
 
+        can_speak = self.speech_enabled and self.speaker is not None and bool(reply.speech)
+
         if not sent:
-            log.info("本条不重试，避免触发风控（%s）", why)
-            return
+            # 弹幕没发出去（配额/风控/账号限制）。默认就此打住；
+            # 但账号压根发不了弹幕时，观众至少还能听到声音
+            if not (can_speak and self.cfg.speech.when_failed):
+                log.info("本条不重试，避免触发风控（%s）", why)
+                return
+            log.info("弹幕没发出去（%s），按配置仍然播报语音", why)
+            self._recent_replies.append(danmaku)
+        else:
+            self.replied += 1
+            self._recent_replies.append(danmaku)
+            self.store.mark_replied(event.uid)
+            self.store.touch_viewer(event.uid, event.uname)
 
-        self.replied += 1
-        self._recent_replies.append(danmaku)
-        self.store.mark_replied(event.uid)
-        self.store.touch_viewer(event.uid, event.uname)
-
-        if self.speech_enabled and self.speaker is not None and reply.speech:
+        if can_speak:
             # 语音合成要 1.4 秒左右，不能堵住决策循环：
             # 丢到后台任务，合成完自然进播放队列
             task = asyncio.create_task(self._speak(reply.speech))

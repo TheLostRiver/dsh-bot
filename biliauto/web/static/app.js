@@ -199,6 +199,10 @@ async function loadSettings() {
     $("v-rate").value = s.speech.rate || "";
     $("v-pitch").value = s.speech.pitch || "+0Hz";
     $("v-max").value = s.speech.max_chars;
+    if ($("v-sysaudio")) {
+      $("v-sysaudio").checked = !!s.speech.system_audio;
+      $("v-whenfailed").checked = !!s.speech.when_failed;
+    }
     if ($("m-enabled")) {
       $("m-enabled").checked = !!s.speech.mix_enabled;
       $("m-input").value =
@@ -309,6 +313,8 @@ function collectSettings() {
       mix_mic_gain: num("m-mic", 1),
       mix_tts_gain: num("m-tts", 1),
       mix_duck: num("m-duck", 0.85),
+      when_failed: $("v-whenfailed").checked,
+      system_audio: $("v-sysaudio").checked,
     },
     comments: {
       enabled: $("c-enabled").checked,

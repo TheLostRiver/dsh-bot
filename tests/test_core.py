@@ -576,10 +576,10 @@ def test_diagnose() -> None:
           "file_mode" in [f.code for f in d.findings] and not d.reachable)
 
     # play 到物理设备 = 观众听不到
-    d = diagnose(replace(base, enabled=True, backend="play", mix_enabled=False, device=None),
-                 "耳机 (Realtek)", outs, ins)
-    check("默认播到物理设备时警告", "play_default_physical" in codes(
-        replace(base, enabled=True, backend="play", mix_enabled=False, device=None)))
+    no_sys = replace(base, enabled=True, backend="play", mix_enabled=False,
+                     device=None, system_audio=False)
+    d = diagnose(no_sys, "耳机 (Realtek)", outs, ins)
+    check("默认播到物理设备时警告", "play_default_physical" in codes(no_sys))
     check("物理设备判为不可达", d.reachable is False)
 
     # play 到虚拟声卡 = 可达
@@ -1035,6 +1035,101 @@ def test_instance_lock() -> None:
     b.release()
 
 
+def test_speak_on_failure() -> None:
+    """弹幕发不出去时，按开关决定要不要照样播报。"""
+    print("\n[失败仍播报]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    from biliauto.bili.danmaku import LiveEvent
+    from biliauto.config import AppConfig
+    from biliauto.llm import Reply
+    from biliauto.live.bot import LiveBot
+
+    cfg = AppConfig.load()
+
+    def run_once(when_failed: bool):
+        c = replace(cfg, dry_run=False,
+                    speech=replace(cfg.speech, enabled=True, when_failed=when_failed))
+        st = Store(Path(tempfile.mkdtemp()) / "wf.db")
+        bot = LiveBot(c, st)
+
+        class B:
+            online = True
+
+            async def decide(self, m, n):
+                return Reply(True, "发不出去的弹幕", "我还是想说话")
+
+        bot.brain = B()
+
+        class FailingSender:
+            dry_run = False
+
+            async def send(self, text, reply_mid=None):
+                return False, "code:1001"
+
+        bot.sender = FailingSender()
+
+        spoken: list[str] = []
+
+        class FakeSpeaker:
+            async def say(self, text):
+                spoken.append(text)
+                return Path("fake.mp3")
+
+        bot.speaker = FakeSpeaker()
+        bot.speech_enabled = True
+
+        ev = LiveEvent(kind="DANMU_MSG", uid=1, uname="甲", text="你好？")
+
+        async def go():
+            eid = st.log_event(ev.kind, ev.uid, ev.uname, ev.text)
+            await bot._process(eid, ev)
+            await _asyncio.sleep(0.05)
+
+        _asyncio.run(go())
+        st.close()
+        return spoken
+
+    check("关闭时失败就不播", run_once(False) == [])
+    check("开启时失败仍然播报", run_once(True) == ["我还是想说话"])
+
+
+def test_system_audio() -> None:
+    """声明了系统声音采集，自检应判为可达。"""
+    print("\n[系统声音采集]")
+    from dataclasses import replace
+
+    from biliauto.audio.check import diagnose
+    from biliauto.config import AppConfig
+
+    base = AppConfig.load().speech
+    outs = [{"index": 4, "name": "耳机 (Realtek High Definition Audio)"}]
+    ins = [{"index": 1, "name": "麦克风 (Realtek)"}]
+    speech = replace(base, enabled=True, backend="play", mix_enabled=False, device=None)
+
+    d1 = diagnose(replace(speech, system_audio=False), "耳机 (Realtek)", outs, ins)
+    check("没声明时判不可达", not d1.reachable)
+
+    d2 = diagnose(replace(speech, system_audio=True), "耳机 (Realtek)", outs, ins)
+    check("声明后判可达", d2.reachable)
+    check("给出对应结论", "play_system_audio" in [f.code for f in d2.findings])
+
+
+def test_settings_merge() -> None:
+    """部分字段更新不能冲掉其他配置。"""
+    print("\n[设置深合并]")
+    from biliauto.web.app import _deep_merge
+
+    base = {"speech": {"backend": "play", "voice": "zh-CN-XiaoxiaoNeural"},
+            "browse": {"keywords": ["大肥鱼"]}}
+    out = _deep_merge(base, {"speech": {"backend": "file"}})
+    check("被改的字段生效", out["speech"]["backend"] == "file")
+    check("未提到的字段保留", out["speech"]["voice"] == "zh-CN-XiaoxiaoNeural")
+    check("其他分区保留", out["browse"]["keywords"] == ["大肥鱼"])
+    check("不改动原对象", base["speech"]["backend"] == "play")
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -1065,6 +1160,7 @@ def main() -> int:
                test_diagnose, test_live_fixes,
                test_offline_and_comment_fixes, test_live_lifecycle, test_instance_lock,
                test_comment_retry, test_pagination_bounds, test_tts_cleanup,
+               test_speak_on_failure, test_system_audio, test_settings_merge,
                test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")

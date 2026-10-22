@@ -320,6 +320,10 @@ BILI_BUVID3=<一串带 infoc 后缀的标识>
 `SPEECH_BACKEND=play`，TTS 播到系统默认输出；直播姬里打开**系统声音**采集。
 缺点是会把微信提示音之类一起带进直播。
 
+开好之后，记得在后台「语音播报 → 播放设备」下面勾上
+**「直播软件已开启系统声音采集」** —— 自检据此判定「观众能听到 AI 说话」，
+否则它只能给警告（它看不到直播姬的设置）。
+
 **B. 走虚拟声卡（更干净，推荐）**
 
 1. 装 [VB-CABLE](https://vb-audio.com/Cable/)
@@ -562,7 +566,7 @@ scripts/
   check_env.py       环境自检
   replay.py          离线回放（不连 B 站）
 tests/
-  test_core.py       157 项断言，python tests/test_core.py
+  test_core.py       166 项断言，python tests/test_core.py
 ```
 
 **改动建议**：想改性格就只动 `llm.py` 里的 `build_system_prompt`（或直接用后台的人设表单）；

@@ -208,6 +208,10 @@ class SpeechConfig:
     mix_mic_gain: float
     mix_tts_gain: float
     mix_duck: float
+    # 弹幕没发出去时，语音照样播（账号被限制时也能出声）
+    when_failed: bool
+    # 直播软件（直播姬/OBS）里已开启「系统声音采集」—— 用户声明，自检据此下结论
+    system_audio: bool
 
 
 @dataclass(frozen=True)
@@ -326,6 +330,8 @@ class AppConfig:
                 mix_mic_gain=_float("SPEECH_MIX_MIC_GAIN", 1.0),
                 mix_tts_gain=_float("SPEECH_MIX_TTS_GAIN", 1.0),
                 mix_duck=_float("SPEECH_MIX_DUCK", 0.85),
+                when_failed=_bool("SPEECH_WHEN_FAILED", False),
+                system_audio=_bool("SPEECH_SYSTEM_AUDIO", False),
             ),
             dry_run=_bool("DRY_RUN", False),
             log_level=_str("LOG_LEVEL", "INFO").upper(),
@@ -583,6 +589,8 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
             mix_mic_gain=_num(speech, "mix_mic_gain", cfg.speech.mix_mic_gain),
             mix_tts_gain=_num(speech, "mix_tts_gain", cfg.speech.mix_tts_gain),
             mix_duck=min(max(_num(speech, "mix_duck", cfg.speech.mix_duck), 0.0), 1.0),
+            when_failed=_bol(speech, "when_failed", cfg.speech.when_failed),
+            system_audio=_bol(speech, "system_audio", cfg.speech.system_audio),
         ),
         dry_run=_bol(s, "dry_run", cfg.dry_run),
     )
