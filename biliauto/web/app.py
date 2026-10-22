@@ -535,8 +535,17 @@ def create_app() -> FastAPI:
 
     @app.post("/api/bot/dry-run")
     async def bot_dry_run(payload: dict) -> dict:
-        """改 dry_run 需要重启才生效，这里只做提示。"""
-        return {"ok": True, "restart_required": manager.running}
+        """切换演练模式并落盘。运行中的机器人需要重启才会用新值。"""
+        enabled = bool(payload.get("dry_run", True))
+        cfg = AppConfig.load()
+        settings = vault.load_settings(cfg.data_dir)
+        settings["dry_run"] = enabled
+        vault.save_settings(cfg.data_dir, settings)
+        return {
+            "ok": True,
+            "dry_run": enabled,
+            "restart_required": manager.running,
+        }
 
     # ---------------- 人设预览 ----------------
     @app.post("/api/persona/preview")

@@ -20,7 +20,6 @@ import itertools
 import logging
 import time
 from collections import deque
-from dataclasses import asdict
 
 from ..config import AppConfig
 from ..llm import Brain, build_system_prompt

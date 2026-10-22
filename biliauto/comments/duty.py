@@ -248,7 +248,6 @@ class CommentDuty:
         r.videos = len(videos)
 
         # 3. 逐视频读评论
-        now = time.time()
         queued: list[CommentEvent] = []
         for v in videos:
             try:

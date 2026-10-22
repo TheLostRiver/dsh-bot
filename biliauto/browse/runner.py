@@ -7,11 +7,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import httpx
 
