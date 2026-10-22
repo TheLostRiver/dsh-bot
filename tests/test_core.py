@@ -694,6 +694,18 @@ def test_live_fixes() -> None:
     _asyncio.run(handler({"data": payload}))
     check("处理函数异常被吞掉", boom["called"] == 1)
 
+    # ③.5 打了钱没留言的 SC 不能丢
+    from biliauto.bili.danmaku import parse_event
+    from biliauto.live.guard import TriggerPolicy
+
+    sc = parse_event("SUPER_CHAT_MESSAGE", {"data": {"price": 30, "uid": 5,
+                                                     "user_info": {"uname": "老板"}}})
+    check("空文本 SC 仍然会产生事件", sc is not None and "SC" in sc.text, str(sc))
+    pol = TriggerPolicy(cfg.trigger, cfg.persona.aliases, 999)
+    dec = pol.classify(sc.uid, sc.uname, sc.text, sc.kind)
+    check("空文本 SC 仍然按付费处理", dec.action == "consider" and dec.priority == 2,
+          f"{dec.action}/{dec.reason}")
+
     # ④ 没凭据时拒绝真开播（接口层的同一判断）
     no_cred = replace(cfg, dry_run=False, bili=replace(cfg.bili, sessdata="", bili_jct=""))
     check("无凭据不应被视为可发送", (not no_cred.dry_run and not no_cred.bili.has_credential))

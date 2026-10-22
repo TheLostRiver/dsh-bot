@@ -84,7 +84,12 @@ def parse_event(kind: str, data: dict) -> LiveEvent | None:
         user_info = payload.get("user_info") or {}
         text = str(payload.get("message") or "").strip()
         if not text:
-            return None
+            # 打了钱但没留言也要给反应，不能整条丢掉
+            try:
+                price = int(payload.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0
+            text = f"（打了 {price} 元 SC，没写内容）" if price else "（打了 SC，没写内容）"
         return LiveEvent(
             kind="SUPER_CHAT_MESSAGE",
             uid=int(payload.get("uid") or 0),
