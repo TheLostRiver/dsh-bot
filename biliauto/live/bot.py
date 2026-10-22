@@ -125,6 +125,7 @@ class LiveBot:
             self._queue.put_nowait((-decision.priority, next(self._seq), (event_id, event)))
         except asyncio.QueueFull:
             log.warning("处理队列已满，丢弃：%s", event.text[:20])
+            self.store.set_event_decision(event_id, "skipped", "queue_full")
 
     # ---------- 工作协程 ----------
     async def _worker(self) -> None:
@@ -143,6 +144,21 @@ class LiveBot:
                 log.exception("处理消息时异常，已跳过该条")
             finally:
                 self._queue.task_done()
+
+    def _drain_queue(self) -> int:
+        """把队列里剩下的事件标成 skipped，避免库里留一堆没有结论的记录。"""
+        dropped = 0
+        while True:
+            try:
+                _, _, (event_id, _event) = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self.store.set_event_decision(event_id, "skipped", "stopped")
+            self._queue.task_done()
+            dropped += 1
+        if dropped:
+            log.info("停止时有 %s 条事件未处理，已标记为 skipped", dropped)
+        return dropped
 
     async def _await_budget(self, uid: int) -> tuple[bool, str]:
         """在可接受的时间内等配额，而不是一遇到冷却就丢消息。"""
@@ -291,8 +307,10 @@ class LiveBot:
     async def run(self, client=None) -> None:
         worker = asyncio.create_task(self._worker(), name="bot-worker")
         tasks = [worker]
+        client_task = None
         if client is not None:
-            tasks.append(asyncio.create_task(client.run(), name="live-client"))
+            client_task = asyncio.create_task(client.run(), name="live-client")
+            tasks.append(client_task)
 
         log.info(
             "机器人已启动 | 房间=%s | dry_run=%s | 配额=%s/%s/%s",
@@ -304,14 +322,24 @@ class LiveBot:
         )
 
         try:
-            done, pending = await asyncio.wait(
-                tasks, return_when=asyncio.FIRST_EXCEPTION
+            # 注意用 FIRST_COMPLETED 而不是 FIRST_EXCEPTION：
+            # 后者在没有异常时等价于"等全部任务结束"，worker 是永久循环，
+            # 于是弹幕连接一断，机器人会永远挂在那里不退（界面还显示运行中）。
+            done, _pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
             )
             for t in done:
-                if not t.cancelled() and t.exception():
-                    log.error("任务异常退出：%s", t.exception())
+                if t.cancelled():
+                    continue
+                exc = t.exception()
+                if exc is not None:
+                    log.error("任务异常退出（%s）：%s", t.get_name(), exc)
+                elif t is client_task:
+                    log.warning("弹幕连接已结束（直播间关闭或断线），机器人随之停止")
         finally:
             self._stopping.set()
+            # 队列里没处理完的，给个明确结局，别让它们一直停在 considered
+            self._drain_queue()
             if client is not None:
                 await client.stop()
             for t in tasks:

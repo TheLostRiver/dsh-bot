@@ -780,6 +780,92 @@ def test_offline_and_comment_fixes() -> None:
     store3.close()
 
 
+def test_live_lifecycle() -> None:
+    """队列溢出、停止收尾、连接断开后退出。"""
+    print("\n[直播生命周期]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    from biliauto.bili.danmaku import LiveEvent
+    from biliauto.config import AppConfig
+    from biliauto.llm import Reply
+    from biliauto.live.bot import LiveBot
+
+    cfg = AppConfig.load()
+    always = replace(cfg, dry_run=True,
+                     trigger=replace(cfg.trigger, reply_probability=1.0))
+
+    def mk_ev(i):
+        return LiveEvent(kind="DANMU_MSG", uid=i, uname=f"u{i}", text=f"消息{i}")
+
+    # ① 队列满：被丢弃的事件要有结局，不能停在 considered
+    store = Store(Path(tempfile.mkdtemp()) / "ov.db")
+    bot = LiveBot(always, store)
+
+    async def fill():
+        for i in range(80):
+            await bot.handle_event(mk_ev(i))
+
+    _asyncio.run(fill())
+    rows = {
+        (r[0], r[1]): r[2]
+        for r in store._conn.execute(
+            "SELECT decision, IFNULL(reason,''), COUNT(*) FROM events GROUP BY 1,2"
+        )
+    }
+    check("队列满的事件标记为 queue_full", rows.get(("skipped", "queue_full")) == 30,
+          str(rows))
+    check("没有事件停留在无结论状态", rows.get(("considered", "sampled")) == 50, str(rows))
+    store.close()
+
+    # ② 连接正常断开时 run() 必须返回（否则界面一直显示运行中）
+    store2 = Store(Path(tempfile.mkdtemp()) / "life.db")
+    bot2 = LiveBot(always, store2)
+
+    class SlowBrain:
+        online = True
+
+        async def decide(self, m, n):
+            await _asyncio.sleep(0.5)
+            return Reply(True, "好", "好")
+
+    bot2.brain = SlowBrain()
+
+    class FakeClient:
+        async def run(self):
+            await _asyncio.sleep(0.05)
+            return None
+
+        async def stop(self):
+            pass
+
+    async def life():
+        async def feeder():
+            await _asyncio.sleep(0.01)
+            for i in range(5):
+                await bot2.handle_event(mk_ev(i))
+
+        _asyncio.create_task(feeder())
+        await _asyncio.wait_for(bot2.run(FakeClient()), timeout=8)
+
+    try:
+        _asyncio.run(life())
+        returned = True
+    except _asyncio.TimeoutError:
+        returned = False
+    check("连接断开后 run() 会返回", returned)
+
+    rows2 = {
+        r[0]: r[1]
+        for r in store2._conn.execute(
+            "SELECT IFNULL(reason,''), COUNT(*) FROM events GROUP BY 1"
+        )
+    }
+    check("停止时队列里的事件被收尾", rows2.get("stopped", 0) >= 1
+          and rows2.get("", 0) == 0, str(rows2))
+    store2.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -808,7 +894,8 @@ def main() -> int:
                test_store, test_patterns, test_comments, test_browse,
                test_browse_rebuild, test_browse_fixes, test_mixer,
                test_diagnose, test_live_fixes,
-               test_offline_and_comment_fixes, test_sender_clamp):
+               test_offline_and_comment_fixes, test_live_lifecycle,
+               test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0
