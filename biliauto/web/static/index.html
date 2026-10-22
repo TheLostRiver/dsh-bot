@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-bot · 管理后台</title>
-<link rel="stylesheet" href="/static/style.css?v=12" />
+<link rel="stylesheet" href="/static/style.css?v=13" />
 </head>
 <body>
 
@@ -86,9 +86,12 @@
             <div class="switch-title">语音播报</div>
             <div class="hint tiny" id="speech-state">读取中…</div>
           </div>
-          <button class="switch" id="switch-speech" type="button" role="switch" aria-checked="false">
-            <span class="knob"></span>
-          </button>
+          <div class="switch-actions">
+            <button class="btn ghost sm" id="btn-speech-test" type="button">测试播报</button>
+            <button class="switch" id="switch-speech" type="button" role="switch" aria-checked="false">
+              <span class="knob"></span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -458,6 +461,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=15"></script>
 </body>
 </html>

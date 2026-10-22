@@ -291,6 +291,8 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-si
 .diag-detail { color: var(--dim); font-size: 12px; margin-top: 2px; line-height: 1.5; }
 .diag-fix { color: #9fc2ff; font-size: 12px; margin-top: 3px; }
 
+.switch-actions { display: flex; align-items: center; gap: 10px; }
+
 /* ---------- 记录页筛选 ---------- */
 .filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
 .filter-search { max-width: 420px; }

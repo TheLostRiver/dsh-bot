@@ -1331,6 +1331,27 @@ async function refreshDiagnose() {
   }
 }
 
+async function testSpeech() {
+  const btn = $("btn-speech-test");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "播放中…";
+  try {
+    const r = await api("/api/speech/test", { method: "POST", body: "{}" });
+    if (r.backend !== "play" && !r.mix && r.via === "bot") {
+      toast("已生成音频，但当前是 file 模式：不会自动播放");
+    } else {
+      toast(r.message || "已播出测试语音");
+    }
+    if (r.mixer) refreshMix();
+  } catch (e) {
+    toast("测试失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
 /* ---------------------------------------------------------------- 交互 */
 async function toggleBot() {
   const btn = $("btn-toggle");
@@ -1402,6 +1423,7 @@ function bind() {
   $("btn-comment-toggle").addEventListener("click", toggleComments);
   $("switch-speech").addEventListener("click", toggleSpeech);
   $("btn-mix-test").addEventListener("click", testMix);
+  $("btn-speech-test").addEventListener("click", testSpeech);
   $("btn-diag").addEventListener("click", refreshDiagnose);
   $("btn-comment-scan").addEventListener("click", scanComments);
   $("btn-save").addEventListener("click", saveSettings);

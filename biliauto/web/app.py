@@ -842,6 +842,52 @@ def create_app() -> FastAPI:
             applied = True
         return {"ok": True, "enabled": enabled, "applied": applied}
 
+    @app.post("/api/speech/test")
+    async def speech_test(payload: dict | None = None) -> dict:
+        """用**正在运行的那个** Speaker 说一句话，走的是和真实回复完全相同的音频链路。
+
+        和 /api/tts/preview 的区别：那个只是把 mp3 丢给浏览器听，
+        这个会经过混音器/输出设备，所以能验证"直播里听不听得到"。
+        """
+        cfg = AppConfig.load()
+        text = str((payload or {}).get("text") or "").strip()
+        text = text[:100] or "这是一条语音测试，能听到就说明直播里能听到我说话"
+
+        bot = manager.bot
+        if bot is not None and bot.speaker is not None:
+            if not bot.speech_enabled:
+                raise HTTPException(
+                    status_code=409, detail="语音播报是关的，先点上面的开关打开"
+                )
+            path = await bot.speaker.say(text)
+            return {
+                "ok": True,
+                "via": "bot",
+                "backend": cfg.speech.backend,
+                "mix": cfg.speech.mix_enabled,
+                "generated": bool(path),
+                "mixer": bot.speaker.mixer_snapshot(),
+                "message": "已走机器人的音频链路播出一句",
+            }
+
+        # 机器人没在跑：临时建一个，仅用于验证设备
+        from dataclasses import replace as _replace
+
+        from ..bili.actions import Speaker
+
+        global _mix_probe
+        if _mix_probe is None:
+            _mix_probe = Speaker(_replace(cfg.speech, mix_enabled=cfg.speech.mix_enabled))
+        path = await _mix_probe.say(text)
+        return {
+            "ok": True,
+            "via": "probe",
+            "backend": cfg.speech.backend,
+            "mix": cfg.speech.mix_enabled,
+            "generated": bool(path),
+            "message": "机器人没在跑，已用临时实例播放",
+        }
+
     @app.get("/api/speech/state")
     async def speech_state() -> dict:
         cfg = AppConfig.load()
