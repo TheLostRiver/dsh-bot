@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from biliauto.bili.danmaku import LiveEvent, parse_event  # noqa: E402
+from biliauto.bili.danmaku import parse_event  # noqa: E402
 from biliauto.config import GuardConfig, TriggerConfig  # noqa: E402
 from biliauto.llm import Brain  # noqa: E402
 from biliauto.live.guard import DanmakuBudget, TriggerPolicy  # noqa: E402
