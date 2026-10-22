@@ -1368,11 +1368,15 @@ async function toggleBot() {
       toast("已停止");
     } else {
       const dry = $("s-dryrun").checked;
-      await api("/api/bot/start", {
+      const r = await api("/api/bot/start", {
         method: "POST",
         body: JSON.stringify({ dry_run: dry }),
       });
-      toast(dry ? "已启动（演练模式，不会真发弹幕）" : "已启动");
+      if (r.warning) {
+        toast(r.warning);     // 登录失效之类的问题要让人看见
+      } else {
+        toast(dry ? "已启动（演练模式，不会真发弹幕）" : "已启动");
+      }
     }
     await refreshStatus();
   } catch (e) {

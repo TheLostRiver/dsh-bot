@@ -558,6 +558,18 @@ def create_app() -> FastAPI:
                 status_code=409,
                 detail="没有 DeepSeek API Key，真实回复无法生成。先配置 Key，或勾上演练模式。",
             )
+        # 登录失效不阻止启动（语音播报根本不依赖它），但要明说，
+        # 否则用户只会看到"已启动"然后一条弹幕都发不出去
+        warning = ""
+        if not cfg.dry_run and cfg.bili.has_credential:
+            acc = await account_info(cfg, force=True)
+            if not acc.get("valid"):
+                warning = (
+                    "AI 账号登录已失效（-101），弹幕发不出去，语音播报不受影响。"
+                    "需要发弹幕的话，去「设置」重新扫码登录。"
+                )
+                log.warning(warning)
+
         try:
             await manager.start(cfg)
         except RuntimeError as e:
@@ -565,7 +577,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.exception("启动失败")
             raise HTTPException(status_code=500, detail=f"启动失败：{e}")
-        return {"ok": True, "bot": manager.snapshot()}
+        return {"ok": True, "bot": manager.snapshot(), "warning": warning}
 
     @app.post("/api/bot/stop")
     async def bot_stop() -> dict:
