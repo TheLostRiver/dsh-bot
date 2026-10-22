@@ -134,6 +134,9 @@ class Speaker:
             await communicate.save(str(path))
         except Exception as e:
             log.warning("TTS 合成失败：%s", e)
+            # save() 往往是先建文件再边写边下，网络中途断开会留下空文件，
+            # 不删的话 data/speech 会被 0 字节的垃圾堆满
+            path.unlink(missing_ok=True)
             return None
 
         if self.cfg.mix_enabled:
@@ -182,6 +185,8 @@ class Speaker:
                 log.debug("播放失败：%s", e)
             finally:
                 self._queue.task_done()
+                # play 模式是即时播放，不归档；留着只会让 data/speech 无限增长
+                path.unlink(missing_ok=True)
                 path.unlink(missing_ok=True)
 
     def _play_blocking(self, mp3: Path) -> None:

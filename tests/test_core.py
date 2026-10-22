@@ -974,6 +974,42 @@ def test_pagination_bounds() -> None:
     store.close()
 
 
+def test_tts_cleanup() -> None:
+    """合成失败不能留下空文件。"""
+    print("\n[TTS 清理]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    import edge_tts
+
+    from biliauto.bili.actions import Speaker
+    from biliauto.config import AppConfig
+
+    cfg = AppConfig.load()
+    out = Path(tempfile.mkdtemp()) / "sp"
+    sp = Speaker(replace(cfg.speech, out_dir=out))
+
+    class FakeComm:
+        def __init__(self, *a, **k):
+            pass
+
+        async def save(self, path):
+            # 真实情况：先建文件再边下边写，中途断开就留下空文件
+            Path(path).write_bytes(b"")
+            raise RuntimeError("模拟连接中断")
+
+    real = edge_tts.Communicate
+    edge_tts.Communicate = FakeComm
+    try:
+        r = _asyncio.run(sp.say("模拟失败"))
+    finally:
+        edge_tts.Communicate = real
+
+    check("合成失败返回 None", r is None)
+    check("失败后不留空文件", not list(out.glob("*.mp3")),
+          str([f.name for f in out.glob("*.mp3")]))
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -1003,7 +1039,7 @@ def main() -> int:
                test_browse_rebuild, test_browse_fixes, test_mixer,
                test_diagnose, test_live_fixes,
                test_offline_and_comment_fixes, test_live_lifecycle,
-               test_comment_retry, test_pagination_bounds,
+               test_comment_retry, test_pagination_bounds, test_tts_cleanup,
                test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
