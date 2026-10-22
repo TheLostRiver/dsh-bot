@@ -946,6 +946,34 @@ def test_comment_retry() -> None:
     store.close()
 
 
+def test_pagination_bounds() -> None:
+    """分页参数被喂负数时不能反过来返回更多。"""
+    print("\n[分页边界]")
+    import logging
+
+    from biliauto.web.app import LogBuffer
+
+    buf = LogBuffer()
+    for i in range(10):
+        buf.emit(logging.LogRecord("x", logging.INFO, __file__, 1, f"第{i}条", None, None))
+    check("tail(3) 取 3 条", len(buf.tail(3)) == 3)
+    check("tail(0) 不返回全部", buf.tail(0) == [])
+    check("tail(-1) 不丢第一条", buf.tail(-1) == [])
+    check("tail(100) 不超过总量", len(buf.tail(100)) == 10)
+
+    store = Store(Path(tempfile.mkdtemp()) / "page.db")
+    for i in range(20):
+        store.record_browse(f"BV{i:03d}", 100 + i, f"标题{i}", 1, "UP", 300, 5000, 0, "judged")
+    store._conn.commit()
+    check("limit=2 只给 2 条", len(store.browse_history(limit=2)["items"]) == 2)
+    check("limit=-1 不会拉全表",
+          len(store.browse_history(limit=-1)["items"]) == 1,
+          str(len(store.browse_history(limit=-1)["items"])))
+    check("offset 负数被夹成 0",
+          len(store.browse_history(limit=5, offset=-3)["items"]) == 5)
+    store.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -975,7 +1003,7 @@ def main() -> int:
                test_browse_rebuild, test_browse_fixes, test_mixer,
                test_diagnose, test_live_fixes,
                test_offline_and_comment_fixes, test_live_lifecycle,
-               test_comment_retry,
+               test_comment_retry, test_pagination_bounds,
                test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")

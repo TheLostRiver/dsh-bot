@@ -58,6 +58,9 @@ class LogBuffer(logging.Handler):
         return [x for x in self._items if x["seq"] > seq]
 
     def tail(self, n: int) -> list[dict]:
+        # 注意 list[-0:] 是"全部"、list[-(-1):] 会丢掉第一条 —— 负数必须单独挡掉
+        if n <= 0:
+            return []
         return list(self._items)[-n:]
 
     @property
@@ -994,7 +997,8 @@ def create_app() -> FastAPI:
     # ---------------- 观测 ----------------
     @app.get("/api/logs")
     async def logs(after: int = 0, limit: int = 200) -> dict:
-        items = buffer.since(after) if after else buffer.tail(limit)
+        limit = max(1, min(int(limit), 1000))
+        items = buffer.since(after) if after > 0 else buffer.tail(limit)
         return {"items": items[:limit], "last": buffer.last_seq}
 
     @app.get("/api/replies")

@@ -521,6 +521,11 @@ class Store:
         verdict: "" 看过并判断 | "acted" 互动过 | "judged" 看过没动 | "skip" 跳过
         action : 只保留某个动作成功的条目（like/favorite/coin/follow/comment）
         """
+        # SQLite 里 LIMIT -1 等于"不限量"，负 offset 也会被当成 0，
+        # 前端传个 -1 就能把整张表拉出来，这里先夹住
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+
         where = ["1=1"]
         params: list = []
 
