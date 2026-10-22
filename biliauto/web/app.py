@@ -160,6 +160,7 @@ _account_cache = _Cache(60)
 _room_cache = _Cache(30)
 _voice_cache = _Cache(3600)
 _mix_probe = None  # 混音自检用的临时 Speaker
+_mix_auto_stop: asyncio.Task | None = None
 
 # 试听音频很小（十几 KB），内存里留十几条足够，别写盘
 _tts_cache: dict[tuple, bytes] = {}
@@ -770,12 +771,28 @@ def create_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=409, detail=msg)
         path = await _mix_probe.say("混音测试，一二三，能听到就说明路由是对的")
+
+        # 测试完必须自己把麦克风关掉：一条测试语音没必要一直占着麦
+        global _mix_auto_stop
+        if _mix_auto_stop is not None and not _mix_auto_stop.done():
+            _mix_auto_stop.cancel()
+        queued = float(_mix_probe.mixer_snapshot().get("queued_seconds") or 0)
+        _mix_auto_stop = asyncio.create_task(
+            _auto_stop_probe(min(max(queued, 1.0) + 3.0, 30.0))
+        )
+
         return {
             "ok": True,
-            "message": "已送出一段测试语音，检查直播姬里能不能听到",
+            "message": "已送出一段测试语音，播完会自动关掉麦克风",
             "generated": bool(path),
             "mixer": _mix_probe.mixer_snapshot(),
         }
+
+    async def _auto_stop_probe(delay: float) -> None:
+        await asyncio.sleep(delay)
+        if _mix_probe is not None:
+            _mix_probe.stop_mixer()
+            log.info("混音测试结束，已自动关闭麦克风")
 
     @app.post("/api/audio/mix/stop")
     async def mix_stop() -> dict:
