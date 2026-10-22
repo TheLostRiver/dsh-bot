@@ -256,7 +256,12 @@ async function loadSettings() {
     }
 
     settingsLoaded = true;
+    $("btn-save").disabled = false;
   } catch (e) {
+    // 表单此刻是空的，绝不能让它被当成"用户配置"存回去
+    settingsLoaded = false;
+    $("btn-save").disabled = true;
+    $("save-hint").textContent = "配置读取失败，已锁住保存";
     toast("读取设置失败：" + e.message);
   }
 }
@@ -345,6 +350,10 @@ function collectSettings() {
 }
 
 async function saveSettings() {
+  if (!settingsLoaded) {
+    toast("配置还没加载成功，先别保存，免得把现有设置清空");
+    return;
+  }
   const btn = $("btn-save");
   btn.disabled = true;
   try {

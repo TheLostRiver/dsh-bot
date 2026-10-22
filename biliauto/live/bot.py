@@ -170,6 +170,15 @@ class LiveBot:
             self.store.set_event_decision(event_id, "skipped", reason)
             return
 
+        # 没有 API Key 时 Brain 会进入离线模式并返回占位文本（"[离线]…"），
+        # 那种东西绝不能真发出去。演练模式除外，因为演练本来就不发。
+        if not self.brain.online and not self.cfg.dry_run:
+            if not getattr(self, "_offline_warned", False):
+                log.error("DeepSeek 不可用，已停止回复（不会发送离线占位文本）")
+                self._offline_warned = True
+            self.store.set_event_decision(event_id, "skipped", "llm_offline")
+            return
+
         messages = self._build_messages(event)
         reply = await self.brain.decide(messages, self.cfg.guard.max_danmaku_len)
         self.store.incr_usage("llm_calls")

@@ -711,6 +711,75 @@ def test_live_fixes() -> None:
     store3.close()
 
 
+def test_offline_and_comment_fixes() -> None:
+    """离线兜底、评论并发、配置刷新三处修复的回归。"""
+    print("\n[离线兜底与评论修复]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    from biliauto.bili.danmaku import LiveEvent
+    from biliauto.comments.duty import CommentDuty, ScanResult
+    from biliauto.config import AppConfig
+    from biliauto.llm import Brain
+    from biliauto.live.bot import LiveBot
+
+    cfg = AppConfig.load()
+    offline = replace(cfg, dry_run=False, llm=replace(cfg.llm, api_key=""))
+
+    # ① 没有 API Key 时不能把 "[离线]…" 发出去
+    store = Store(Path(tempfile.mkdtemp()) / "off.db")
+    bot = LiveBot(offline, store)
+    bot.brain = Brain(offline.llm)
+    sent: list[str] = []
+
+    class FakeSender:
+        dry_run = False
+
+        async def send(self, text, reply_mid=None):
+            sent.append(text)
+            return True, "ok"
+
+    bot.sender = FakeSender()
+    ev = LiveEvent(kind="DANMU_MSG", uid=1, uname="甲", text="好看吗？")
+    eid = store.log_event(ev.kind, ev.uid, ev.uname, ev.text)
+    _asyncio.run(bot._process(eid, ev))
+    check("离线时不发送占位文本", len(sent) == 0, str(sent))
+    store.close()
+
+    # ② 评论值班离线时直接放弃
+    store2 = Store(Path(tempfile.mkdtemp()) / "off2.db")
+    duty = CommentDuty(offline, store2)
+    duty.brain = Brain(offline.llm)
+    from biliauto.comments.collector import CommentEvent
+
+    import time as _t
+
+    c = CommentEvent(rpid=1, oid=1, uid=2, uname="乙", text="这视频好看吗",
+                     ctime=_t.time(), is_top_level=True, reply_count=0)
+    check("评论离线时不生成回复", _asyncio.run(duty._decide(c)) is None)
+    store2.close()
+
+    # ③ 评论扫描并发互斥
+    store3 = Store(Path(tempfile.mkdtemp()) / "cc.db")
+    d3 = CommentDuty(replace(cfg, dry_run=True), store3)
+    calls: list[int] = []
+
+    async def fake_do_scan():
+        calls.append(1)
+        await _asyncio.sleep(0.2)
+        return ScanResult()
+
+    d3._do_scan = fake_do_scan
+
+    async def two():
+        return await _asyncio.gather(d3.scan_once(), d3.scan_once())
+
+    a, b = _asyncio.run(two())
+    check("评论并发只扫一次", len(calls) == 1, str(calls))
+    check("第二轮被拒绝", "还没扫完" in (a.error or b.error), f"{a.error}|{b.error}")
+    store3.close()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -738,7 +807,8 @@ def main() -> int:
     for fn in (test_policy, test_budget, test_llm_coerce, test_parse,
                test_store, test_patterns, test_comments, test_browse,
                test_browse_rebuild, test_browse_fixes, test_mixer,
-               test_diagnose, test_live_fixes, test_sender_clamp):
+               test_diagnose, test_live_fixes,
+               test_offline_and_comment_fixes, test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")
     return 0

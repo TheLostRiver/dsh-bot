@@ -140,12 +140,17 @@ class Speaker:
             ok, why = self.ensure_mixer()
             if not ok:
                 log.warning("混音不可用，本条语音跳过：%s", why)
-                return path
+                path.unlink(missing_ok=True)
+                return None
             try:
                 data, sr = self._decode_wav(path)
                 self._mixer.feed(data, sr)
             except Exception as e:
                 log.warning("混音喂数据失败：%s", e)
+            finally:
+                # 音频已经进混音器了，mp3 留着只会堆满 data/speech
+                path.unlink(missing_ok=True)
+            # 返回非空表示"这条语音已经产出"，调用方只关心真假
             return path
 
         if self.cfg.backend == "play":

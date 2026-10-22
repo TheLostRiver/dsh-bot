@@ -140,6 +140,7 @@ class CommentDuty:
         self.budget = CommentBudget(self.cc, store, dry_run=cfg.dry_run)
 
         self._stop = asyncio.Event()
+        self._scan_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self.last_scan: dict = {}
         self.last_scan_at: float = 0.0
@@ -206,6 +207,15 @@ class CommentDuty:
 
     # ---------- 单轮扫描 ----------
     async def scan_once(self) -> ScanResult:
+        """带互斥：长驻循环和手动扫描不能同时跑，否则会重复回复同一批评论。"""
+        if self._scan_lock.locked():
+            r = ScanResult()
+            r.error = "上一轮还没扫完，稍等"
+            return r
+        async with self._scan_lock:
+            return await self._do_scan()
+
+    async def _do_scan(self) -> ScanResult:
         r = ScanResult()
 
         if self.credential is None:
@@ -313,6 +323,11 @@ class CommentDuty:
         return text
 
     async def _decide(self, c: CommentEvent):
+        if not self.brain.online and not self.cfg.dry_run:
+            if not getattr(self, "_offline_warned", False):
+                log.error("DeepSeek 不可用，评论区不再回复（不会发送离线占位文本）")
+                self._offline_warned = True
+            return None
         system = build_comment_prompt(
             self.cfg.persona, self.cc.max_len, self.up_name, c.video_title
         )

@@ -256,8 +256,8 @@ class CommentManager:
         self.duty = None
 
     async def scan_now(self, cfg: AppConfig) -> dict:
-        """手动扫一轮。没在跑就临时建一个。"""
-        if self.duty is None:
+        """手动扫一轮。没在跑就用当前配置重建，避免拿旧设置去扫。"""
+        if self.duty is None or not self.duty.running:
             self.duty = self._build(cfg)
         result = await self.duty.scan_once()
         self.duty.scans += 1
@@ -490,6 +490,13 @@ def create_app() -> FastAPI:
 
     @app.post("/api/settings")
     async def put_settings(payload: dict) -> dict:
+        # 兜底：前端表单没加载成功时会把空值整包发上来，别让它清空配置
+        persona = payload.get("persona") or {}
+        if "name" in persona and not str(persona.get("name") or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="人设名字不能为空。如果页面刚打开就报这个错，刷新一下再试。",
+            )
         cfg = AppConfig.load()
         vault.save_settings(cfg.data_dir, payload)
         return {"ok": True, "restart_required": manager.running}
@@ -505,6 +512,11 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=409,
                 detail="没有登录凭据，只能演练。先扫码登录，或勾上演练模式再启动。",
+            )
+        if not cfg.dry_run and not cfg.llm.usable:
+            raise HTTPException(
+                status_code=409,
+                detail="没有 DeepSeek API Key，真实回复无法生成。先配置 Key，或勾上演练模式。",
             )
         try:
             await manager.start(cfg)
@@ -820,6 +832,11 @@ def create_app() -> FastAPI:
     @app.post("/api/comments/start")
     async def comments_start() -> dict:
         cfg = AppConfig.load()
+        if not cfg.dry_run and not cfg.llm.usable:
+            raise HTTPException(
+                status_code=409,
+                detail="没有 DeepSeek API Key，评论区无法生成回复。",
+            )
         try:
             await comment_mgr.start(cfg)
         except RuntimeError as e:
