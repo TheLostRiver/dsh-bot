@@ -159,4 +159,14 @@ class LiveClient:
             if inspect.isawaitable(result):
                 await result
         except Exception as e:
-            log.debug("断开连接时出错（可忽略）：%s", e)
+            # disconnect() 在「尚未连接服务器」时会直接抛异常，
+            # 而它内部的「取消所有任务」在抛异常那一行之后 —— 于是心跳、收包任务
+            # 全被跳过，实例变成僵尸：机器人明明停了，还在收弹幕、还在回复。
+            log.info("断开连接时状态异常（%s），改用手动清理", e)
+
+        # 兜底：不管 disconnect 有没有成功，都把它内部残留的任务取消掉
+        leaked = list(getattr(self._danmaku, "_LiveDanmaku__tasks", []) or [])
+        for t in leaked:
+            t.cancel()
+        if leaked:
+            log.info("已清理 %s 个残留任务", len(leaked))

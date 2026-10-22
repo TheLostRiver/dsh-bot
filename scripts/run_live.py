@@ -46,6 +46,7 @@ async def main(args: argparse.Namespace) -> int:
     from biliauto.bili import build_credential, verify_credential
     from biliauto.bili.danmaku import LiveClient
     from biliauto.live.bot import LiveBot
+    from biliauto.lock import bot_lock
     from biliauto.memory.store import Store
 
     credential = build_credential(cfg.bili)
@@ -64,6 +65,14 @@ async def main(args: argparse.Namespace) -> int:
         else:
             print("[警告] 凭据校验失败，cookie 可能已过期，发弹幕大概率失败")
 
+    # 和后台互斥：两边同时跑会让同一条弹幕被回复多次
+    lock = bot_lock(cfg.data_dir)
+    ok, holder = lock.acquire("cli")
+    if not ok:
+        print(f"\n[中止] 已有另一个机器人在运行（{holder}）。")
+        print("先把那个关掉：可能是后台页面里启动的，或者另一个终端里的 run_live.py。\n")
+        return 4
+
     store = Store(cfg.data_dir / "biliauto.db")
     bot = LiveBot(cfg, store)
     client = LiveClient(cfg.bili.room_id, credential=credential, handler=bot.handle_event)
@@ -74,6 +83,7 @@ async def main(args: argparse.Namespace) -> int:
         print("\n收到 Ctrl+C，正在退出…")
     finally:
         store.close()
+        lock.release()
     return 0
 
 

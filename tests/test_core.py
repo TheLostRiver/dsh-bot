@@ -1010,6 +1010,31 @@ def test_tts_cleanup() -> None:
           str([f.name for f in out.glob("*.mp3")]))
 
 
+def test_instance_lock() -> None:
+    """同一份数据目录只允许一个机器人。"""
+    print("\n[单实例锁]")
+    from biliauto.lock import InstanceLock
+
+    d = Path(tempfile.mkdtemp())
+    a = InstanceLock(d / ".bot.lock")
+    b = InstanceLock(d / ".bot.lock")
+
+    ok, _ = a.acquire("web")
+    check("第一个能拿到锁", ok)
+    ok2, holder = b.acquire("cli")
+    check("第二个拿不到锁", not ok2)
+    check("能报出占用者", "web" in holder, holder)
+
+    ok3, _ = a.acquire("again")
+    check("同进程可重入", ok3)
+    a.release()
+    a.release()
+    check("释放后不再持有", not a.held)
+    ok4, _ = b.acquire("cli")
+    check("释放后另一个能拿到", ok4)
+    b.release()
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -1038,7 +1063,7 @@ def main() -> int:
                test_store, test_patterns, test_comments, test_browse,
                test_browse_rebuild, test_browse_fixes, test_mixer,
                test_diagnose, test_live_fixes,
-               test_offline_and_comment_fixes, test_live_lifecycle,
+               test_offline_and_comment_fixes, test_live_lifecycle, test_instance_lock,
                test_comment_retry, test_pagination_bounds, test_tts_cleanup,
                test_sender_clamp):
         fn()

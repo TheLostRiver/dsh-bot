@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..auth import qrlogin, vault
 from ..config import AppConfig, setup_logging
+from ..lock import bot_lock
 from ..memory.store import Store
 
 log = logging.getLogger("biliauto.web")
@@ -78,6 +79,7 @@ class BotManager:
         self.started_at: float = 0.0
         self.error: str = ""
         self.dry_run: bool = False
+        self._data_dir: Path | None = None
 
     @property
     def running(self) -> bool:
@@ -94,11 +96,23 @@ class BotManager:
         if cfg.bili.room_id <= 0:
             raise RuntimeError("还没填直播间房号")
 
+        # 同一份数据目录只允许一个机器人实体：
+        # 否则命令行里的 run_live.py 和这里的会同时连进房间，
+        # 各自一套配额，同一条弹幕会被回好几次（语音也跟着重复）
+        lock = bot_lock(cfg.data_dir)
+        ok, holder = lock.acquire("web")
+        if not ok:
+            raise RuntimeError(
+                f"已有另一个机器人在运行（{holder}），先关掉它再启动。"
+                "常见原因：命令行的 run_live.py 还开着"
+            )
+
         store = Store(cfg.data_dir / "biliauto.db")
         bot = LiveBot(cfg, store)
         credential = build_credential(cfg.bili)
         client = LiveClient(cfg.bili.room_id, credential=credential, handler=bot.handle_event)
 
+        self._data_dir = cfg.data_dir
         self.store, self.bot, self.client = store, bot, client
         self.dry_run = cfg.dry_run
         self.started_at = time.time()
@@ -106,6 +120,7 @@ class BotManager:
         self.task = asyncio.create_task(bot.run(client), name="web-bot")
 
         def _on_done(t: asyncio.Task) -> None:
+            lock.release()
             if t.cancelled():
                 return
             exc = t.exception()
@@ -125,6 +140,8 @@ class BotManager:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+        if self._data_dir is not None:
+            bot_lock(self._data_dir).release()
         if self.store is not None:
             self.store.close()
             self.store = None

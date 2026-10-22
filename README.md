@@ -489,6 +489,36 @@ REPLY_PROBABILITY=0.12   # 普通闲聊被抽中的概率
 | 弹幕发了但观众看不见 | 影子限流 | 换号或停一段时间 |
 | 语音听不到 | OBS 没采到 CABLE Output | 检查 OBS 音频输入设备 |
 | DeepSeek 报 401 | key 错 | 检查 `DEEPSEEK_API_KEY` |
+| **同一条弹幕被回好几次、语音重复播报** | **同时开了多个机器人** | 见下面「单实例锁」 |
+| `1001` 需要绑定手机号 | 账号未实名 | 去 B 站绑定手机号后才能发弹幕 |
+
+### 单实例锁：为什么会有"重复回复"
+
+一条弹幕被回三次、语音一直重复播，最常见的不是代码并发，而是**多个机器人进程同时在线**：
+
+- 命令行里 `run_live.py` 忘了关（或开了两个终端）
+- 后台页面又点了一次启动
+
+每个机器人都有**独立的配额和语音队列**，所以它们会各自回复同一条弹幕 ——
+看起来像"代码有 bug"，其实是三个进程在抢着说话。
+
+现在有进程级文件锁兜底（`data/.bot.lock`）：
+
+```
+[中止] 已有另一个机器人在运行（pid=20896 cli）。先把那个关掉
+```
+
+后台点启动也会直接返回 409 并指出占用者是谁。
+锁是操作系统级的，进程被强杀也会自动释放，不会留下死锁。
+
+**排查时先看进程**：
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+  Select-Object ProcessId, CommandLine
+```
+
+同时存在多个 `run_live.py` 或 `_tmp_*.py` 就是它。
 
 日志默认打在控制台；要留档就重定向：
 
@@ -532,7 +562,7 @@ scripts/
   check_env.py       环境自检
   replay.py          离线回放（不连 B 站）
 tests/
-  test_core.py       151 项断言，python tests/test_core.py
+  test_core.py       157 项断言，python tests/test_core.py
 ```
 
 **改动建议**：想改性格就只动 `llm.py` 里的 `build_system_prompt`（或直接用后台的人设表单）；

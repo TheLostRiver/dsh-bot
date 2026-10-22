@@ -73,6 +73,7 @@ class LiveBot:
         self.speech_enabled = cfg.speech.enabled and speaker is not None
         self.speaker = speaker
         self._speech_tasks: set[asyncio.Task] = set()
+        self._stopped = False
 
         self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=50)
         self._seq = itertools.count()
@@ -92,6 +93,9 @@ class LiveBot:
     # ---------- 入口 ----------
     async def handle_event(self, event) -> None:
         """由 LiveClient 或回放脚本调用。必须轻，重活丢给 worker。"""
+        if self._stopped:
+            # 已经停了的实例绝不能再出声：实测停掉的机器人还会被残留的连接推事件
+            return
         decision = self.policy.classify(
             event.uid, event.uname, event.text, event.kind
         )
@@ -336,6 +340,7 @@ class LiveBot:
                 elif t is client_task:
                     log.warning("弹幕连接已结束（直播间关闭或断线），机器人随之停止")
         finally:
+            self._stopped = True
             self._stopping.set()
             # 队列里没处理完的，给个明确结局，别让它们一直停在 considered
             self._drain_queue()
