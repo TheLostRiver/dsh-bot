@@ -1169,6 +1169,79 @@ def test_send_breaker() -> None:
     st.close()
 
 
+def test_offline_mode() -> None:
+    """未开播时：默认忽略；开关打开则只播报不发弹幕。"""
+    print("\n[未开播模式]")
+    import asyncio as _asyncio
+    from dataclasses import replace
+
+    from biliauto.bili.danmaku import LiveEvent
+    from biliauto.config import AppConfig
+    from biliauto.llm import Reply
+    from biliauto.live.bot import LiveBot
+
+    cfg = AppConfig.load()
+
+    def run(room_live: bool, offline_enabled: bool):
+        c = replace(cfg, dry_run=False, offline_enabled=offline_enabled,
+                    speech=replace(cfg.speech, enabled=True, when_failed=False))
+        st = Store(Path(tempfile.mkdtemp()) / "off.db")
+        bot = LiveBot(c, st)
+        bot.room_live = room_live
+
+        class B:
+            online = True
+
+            async def decide(self, m, n):
+                return Reply(True, "弹幕内容", "我说的话")
+
+        bot.brain = B()
+        sent: list[str] = []
+
+        class S:
+            dry_run = False
+
+            async def send(self, text, reply_mid=None):
+                sent.append(text)
+                return True, "ok"
+
+        bot.sender = S()
+        spoken: list[str] = []
+
+        class Sp:
+            async def say(self, t):
+                spoken.append(t)
+                return Path("x")
+
+        bot.speaker = Sp()
+        bot.speech_enabled = True
+
+        ev = LiveEvent(kind="DANMU_MSG", uid=1, uname="甲", text="在吗？")
+
+        async def go():
+            eid = st.log_event(ev.kind, ev.uid, ev.uname, ev.text)
+            await bot._process(eid, ev)
+            await _asyncio.sleep(0.05)
+            return st._conn.execute(
+                "SELECT decision FROM events WHERE id=?", (eid,)
+            ).fetchone()[0]
+
+        dec = _asyncio.run(go())
+        st.close()
+        return dec, sent, spoken
+
+    dec, sent, spoken = run(True, False)
+    check("直播中照常发弹幕并播报", dec == "replied" and len(sent) == 1 and len(spoken) == 1)
+
+    dec, sent, spoken = run(False, False)
+    check("未开播且开关关：不处理", dec == "skipped" and not sent and not spoken,
+          f"{dec} {len(sent)} {len(spoken)}")
+
+    dec, sent, spoken = run(False, True)
+    check("未开播且开关开：不发弹幕但播报",
+          not sent and spoken == ["我说的话"], f"{len(sent)} {spoken}")
+
+
 def test_sender_clamp() -> None:
     print("\n[发送前的保护]")
     from biliauto.bili.actions import DanmakuSender
@@ -1200,7 +1273,7 @@ def main() -> int:
                test_offline_and_comment_fixes, test_live_lifecycle, test_instance_lock,
                test_comment_retry, test_pagination_bounds, test_tts_cleanup,
                test_speak_on_failure, test_system_audio, test_settings_merge,
-               test_send_breaker,
+               test_send_breaker, test_offline_mode,
                test_sender_clamp):
         fn()
     print(f"\n全部通过：{PASSED} 项断言")

@@ -72,6 +72,20 @@ async function refreshStatus() {
     $("st-sent").textContent = (s.usage && s.usage.danmaku_sent) || 0;
     $("st-uptime").textContent = fmtUptime(bot.uptime || 0);
 
+    // 未开播模式的当前状态提示
+    if ($("offline-hint")) {
+      const on = $("t-offline") && $("t-offline").checked;
+      const live = bot.room_live;
+      $("offline-hint").textContent =
+        live === true
+          ? "当前房间：直播中"
+          : live === false
+            ? (on
+                ? "当前房间：未开播 —— 离线模式已开，弹幕仍会播报（不发弹幕）"
+                : "当前房间：未开播 —— 弹幕会被忽略")
+            : "当前房间：状态查询中…（启动机器人后才有状态）";
+    }
+
     // 概览页：今天的量
     const br = s.browse || {};
     const t = br.today || {};
@@ -174,6 +188,7 @@ async function loadSettings() {
     const s = await api("/api/settings");
     $("s-room").value = s.room_id ?? 0;
     $("s-dryrun").checked = !!s.dry_run;
+    if ($("t-offline")) $("t-offline").checked = !!s.offline_enabled;
 
     $("p-name").value = s.persona.name || "";
     $("p-bio").value = s.persona.bio || "";
@@ -278,6 +293,7 @@ function collectSettings() {
   const out = {
     room_id: Math.max(0, Math.trunc(num("s-room"))),
     dry_run: $("s-dryrun").checked,
+    offline_enabled: $("t-offline").checked,
     persona: {
       name: $("p-name").value.trim(),
       bio: $("p-bio").value.trim(),

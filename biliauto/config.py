@@ -225,6 +225,8 @@ class AppConfig:
     browse: BrowseConfig
     speech: SpeechConfig
     dry_run: bool
+    # 房间没开播时也照常工作（只出声，不发弹幕）—— 开播前调试用
+    offline_enabled: bool
     log_level: str
     data_dir: Path
     root: Path = field(default=ROOT)
@@ -334,6 +336,7 @@ class AppConfig:
                 system_audio=_bool("SPEECH_SYSTEM_AUDIO", False),
             ),
             dry_run=_bool("DRY_RUN", False),
+        offline_enabled=_bool("OFFLINE_ENABLED", False),
             log_level=_str("LOG_LEVEL", "INFO").upper(),
             data_dir=data_dir,
         )
@@ -593,6 +596,7 @@ def _apply_settings(cfg: AppConfig, s: dict) -> AppConfig:
             system_audio=_bol(speech, "system_audio", cfg.speech.system_audio),
         ),
         dry_run=_bol(s, "dry_run", cfg.dry_run),
+        offline_enabled=_bol(s, "offline_enabled", cfg.offline_enabled),
     )
 
 

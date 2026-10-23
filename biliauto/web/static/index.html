@@ -110,6 +110,11 @@
             <label class="full">忽略规则（一行一个正则）<textarea id="t-ignore" rows="5" spellcheck="false"></textarea></label>
           </div>
           <p class="hint tiny">SC、上舰、被叫名字不受概率影响，最高优先。</p>
+            <label class="check full" style="margin-top:10px">
+              <input id="t-offline" type="checkbox" />
+              <span>未开播时也工作（只播报不发弹幕，开播前调试用）</span>
+            </label>
+            <p class="hint tiny" id="offline-hint"></p>
         </div>
 
         <div class="card">
@@ -469,6 +474,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=18"></script>
 </body>
 </html>

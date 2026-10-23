@@ -74,6 +74,9 @@ class LiveBot:
         self.speaker = speaker
         self._speech_tasks: set[asyncio.Task] = set()
         self._stopped = False
+        # 房间是否在播：None=还不知道，True/False 由 _watch_live 定时刷新
+        self.room_live: bool | None = None
+        self._live_warned = False
 
         self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=50)
         self._seq = itertools.count()
@@ -163,6 +166,36 @@ class LiveBot:
             log.info("停止时有 %s 条事件未处理，已标记为 skipped", dropped)
         return dropped
 
+    async def _watch_live(self) -> None:
+        """定时刷新"房间是否在播"，离线与否决定要不要处理弹幕。"""
+        from bilibili_api.live import LiveRoom
+
+        from ..bili.credential import build_credential
+
+        credential = build_credential(self.cfg.bili)
+        was = self.room_live
+        while not self._stopping.is_set():
+            try:
+                info = await LiveRoom(
+                    self.cfg.bili.room_id, credential=credential
+                ).get_room_info()
+                status = int((info.get("room_info") or {}).get("live_status") or 0)
+                self.room_live = status == 1
+                if was is not None and self.room_live != was:
+                    log.info(
+                        "房间状态变化：%s", "已开播" if self.room_live else "未开播"
+                    )
+                    self._live_warned = False
+                was = self.room_live
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.debug("查询开播状态失败（不影响弹幕）：%s", e)
+            try:
+                await asyncio.wait_for(self._stopping.wait(), timeout=60)
+            except asyncio.TimeoutError:
+                pass
+
     async def _await_budget(self, uid: int) -> tuple[bool, str]:
         """在可接受的时间内等配额，而不是一遇到冷却就丢消息。"""
         deadline = time.time() + self.MAX_BUDGET_WAIT
@@ -198,6 +231,17 @@ class LiveBot:
             self.store.set_event_decision(event_id, "skipped", "llm_offline")
             return
 
+        # 房间没开播：默认不处理；开了「未开播也工作」就只出声、不发弹幕
+        voice_only = False
+        if self.room_live is False:
+            if not self.cfg.offline_enabled:
+                if not self._live_warned:
+                    log.info("房间未开播，弹幕先不处理（需要的话在后台打开「未开播时也工作」）")
+                    self._live_warned = True
+                self.store.set_event_decision(event_id, "skipped", "room_offline")
+                return
+            voice_only = True
+
         messages = self._build_messages(event)
         reply = await self.brain.decide(messages, self.cfg.guard.max_danmaku_len)
         self.store.incr_usage("llm_calls")
@@ -207,7 +251,11 @@ class LiveBot:
             return
 
         danmaku = self._polish(reply.danmaku)
-        sent, why = await self.sender.send(danmaku, reply_mid=event.uid or None)
+        if voice_only:
+            # 未开播：不往房间里发弹幕，只播报
+            sent, why = False, "room_offline"
+        else:
+            sent, why = await self.sender.send(danmaku, reply_mid=event.uid or None)
         self.store.log_reply(
             event_id, event.uid, danmaku, reply.speech, sent, "" if sent else why
         )
@@ -218,10 +266,10 @@ class LiveBot:
         if not sent:
             # 弹幕没发出去（配额/风控/账号限制）。默认就此打住；
             # 但账号压根发不了弹幕时，观众至少还能听到声音
-            if not (can_speak and self.cfg.speech.when_failed):
+            if not (can_speak and (self.cfg.speech.when_failed or voice_only)):
                 log.info("本条不重试，避免触发风控（%s）", why)
                 return
-            log.info("弹幕没发出去（%s），按配置仍然播报语音", why)
+            log.info("弹幕没发出去（%s），仍然播报语音", why)
             self._recent_replies.append(danmaku)
         else:
             self.replied += 1
@@ -316,7 +364,8 @@ class LiveBot:
     # ---------- 生命周期 ----------
     async def run(self, client=None) -> None:
         worker = asyncio.create_task(self._worker(), name="bot-worker")
-        tasks = [worker]
+        watcher = asyncio.create_task(self._watch_live(), name="live-watch")
+        tasks = [worker, watcher]
         client_task = None
         if client is not None:
             client_task = asyncio.create_task(client.run(), name="live-client")

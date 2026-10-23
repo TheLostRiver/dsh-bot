@@ -158,6 +158,7 @@ class BotManager:
             "ignored": getattr(bot, "ignored", 0),
             "considered": getattr(bot, "considered", 0),
             "queued": bot._queue.qsize() if bot is not None else 0,
+            "room_live": getattr(bot, "room_live", None),
             "error": self.error,
             # 连续发不出弹幕时会被熔断，这里告诉前端原因
             "send_disabled": (
@@ -360,6 +361,7 @@ def _settings_payload(cfg: AppConfig) -> dict:
     return {
         "room_id": cfg.bili.room_id,
         "dry_run": cfg.dry_run,
+        "offline_enabled": cfg.offline_enabled,
         "persona": {
             "name": cfg.persona.name,
             "bio": cfg.persona.bio,
